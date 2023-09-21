@@ -2,5 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
-.rds
-.png
+
+# ignore everything in Outputs (only to be kept locally)
+/outputs/**
+# ignore everything in Figures (only to be kept locally)
+/figures/**
