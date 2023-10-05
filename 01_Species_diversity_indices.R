@@ -55,8 +55,9 @@ spec_wide <- spec %>%
   dplyr::select(-covertot) %>% 
   # convert to wide to calculate diversity measures
   pivot_wider(names_from = species_new, values_from = cover, values_fill = 0) 
-spec_ric$shan <- diversity(spec_wide) # Shannon entropy
+spec_ric$shan <- diversity(spec_wide[,-1]) # Shannon entropy
 spec_ric$shan_eve <- exp(spec_ric$shan) / spec_ric$spec_ric # shannon evenness
+spec_ric$pilou_eve <- spec_ric$shan / log(spec_ric)
 
 saveRDS(spec_ric, "Outputs/01_Species_diversity.rds")
 
