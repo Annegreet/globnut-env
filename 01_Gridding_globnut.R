@@ -1,6 +1,6 @@
 ## ---------------------------
 ##
-## Script name: 
+## Script name: 01_Gridding_globnut.R
 ##
 ## Purpose of script: Gridding GlobNut database, reducing sampling bias
 ##
@@ -31,8 +31,8 @@ meta_env <- read.csv(paste0(data_dir, "Globnut1.0_env_variable_meta.csv"))
 globnut <- read.csv(paste0(data_dir, "Globnut1.0_metadata.csv")) %>% 
   filter(!is.na(lat)|!is.na(lon)) 
 
-# Construct a global grid with cells approximately 1 km2 (res 16), meaning the distance between center of adjacent cells is ~0.6k
-dggs <- dgconstruct(res = 16, metric = TRUE) # see table for different resolutions https://github.com/r-barnes/dggridR
+# Construct a global grid with cells approximately 3.6 km2 (res 15), meaning the distance between center of adjacent cells is ~1.9km
+dggs <- dgconstruct(res = 15, metric = TRUE) # see table for different resolutions https://github.com/r-barnes/dggridR or dggetres()
 
 # Get the corresponding grid cells for each plot
 globnut$cell <- dgGEO_to_SEQNUM(dggs,globnut$lon,globnut$lat)$seqnum
@@ -44,6 +44,6 @@ quantile(plotcounts$count)
 # get center coordinates of the cells
 gn_grid <- dgSEQNUM_to_GEO(dggs,globnut$cell) %>% 
   data.frame(globnut$plot_ID, cell = globnut$cell, lon = .$lon_deg, lat = .$lat_deg) 
-saveRDS(gn_grid, "outputs/00_Globnut_grid_res15.rds")
+saveRDS(gn_grid, "outputs/01_Globnut_grid_res15.rds")
 
 
