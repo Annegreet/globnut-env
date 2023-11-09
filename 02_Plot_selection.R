@@ -79,11 +79,28 @@ globnut <- grid %>%
   mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
   dplyr::select(-z_biomass)
-saveRDS(globnut, "outputs/01_GlobNut.rds")
+saveRDS(globnut, "outputs/02_GlobNut.rds")
 
 # sub sampled data set to check the effect of oversample areas - 5 per cell
 set.seed(123)
 globnut_samp <- globnut %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-saveRDS(globnut_samp, "outputs/01_GlobNut_subsampled.rds")
+saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled.rds")
+
+# check for effect of grid size
+grid14 <- readRDS("outputs/01_Globnut_grid_res14.rds")
+globnut_samp <- globnut %>%
+  dplyr::select(-cell) %>% 
+  left_join(grid14, by = c("plot_ID" = "globnut.plot_ID")) %>% 
+  group_by(cell) %>%
+  slice_sample(n = 5, replace = FALSE)
+saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled14.rds")
+
+grid16 <- readRDS("outputs/01_Globnut_grid_res16.rds")
+globnut_samp <- globnut %>%
+  dplyr::select(-cell) %>% 
+  left_join(grid16, by = c("plot_ID" = "globnut.plot_ID")) %>% 
+  group_by(cell) %>%
+  slice_sample(n = 5, replace = FALSE)
+saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled16.rds")
