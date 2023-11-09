@@ -15,7 +15,7 @@
 ## Notes:
 ##  
 ## References:
-##
+## Augusto, L., Achat, D. L., Jonard, M., Vidal, D. & Ringeval, B. (2017). Soil parent material—A major driver of plant nutrient limitations in terrestrial ecosystems. Global Change Biology, 23(9), 3808–3824. https://doi.org/10.1111/gcb.13691
 ## ---------------------------
 
 ## Load packages
@@ -29,7 +29,12 @@ clim <- read.csv(paste0(data_dir, "ERA5_climate.csv"))
 age <- read.csv(paste0(data_dir, "soilage.csv")) %>% 
   dplyr::select(-lat, -lon)
 bed <-  read.csv(paste0(data_dir, "lithology.csv")) %>% 
-  dplyr::select(plot_ID, lith = value_chr)
+  dplyr::select(plot_ID, lith = value_chr) %>% 
+  # simplify lithology category same way as Augusto et al (2017)
+  mutate(lith_simp = case_when(lith %in% c("pa", "ss", "va", "su") ~ "acid",
+                               lith %in% c("mt", "vi") ~ "intermediate",
+                               lith %in% c("pb", "vb") ~ "mafic",
+                               lith %in% c("sc", "sm") ~ "calcareous")) 
 # response
 npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>% 
   # add column with nutrient limitation
@@ -63,14 +68,17 @@ globnut <- grid %>%
   # filter plots that have been fertilized
   filter(!harm_fert_appl %in% c(1,2))  %>% 
   # select relevant columns
-  dplyr::select(plot_ID, country, cell, plot_size, sample_year = year, lat, lon, spec_ric, grass_cover, 
-                pilou_eve, soil_age, lith, ndep = sum_5yr, MAT, MAP, N, P, K, NP, lim, biomass) %>% 
+  dplyr::select(plot_ID, country, cell, plot_size, sample_year = year, lat, lon,
+                spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
+                ndep = sum_5yr, MAT, MAP, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year) %>% 
   # filter K-limited and unclear limitation plots
   filter(!lim %in% c("Unclear",  "K(co)-limitation")) %>% 
   # filter out outliers with high biomass (potential filter)
-  mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) 
+  mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) %>% 
+  filter(z_biomass < 4) %>% 
+  dplyr::select(-z_biomass)
 saveRDS(globnut, "outputs/01_GlobNut.rds")
 
 # sub sampled data set to check the effect of oversample areas - 5 per cell
@@ -78,4 +86,4 @@ set.seed(123)
 globnut_samp <- globnut %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-saveRDS(globnut, "outputs/01_GlobNut_subsampled.rds")
+saveRDS(globnut_samp, "outputs/01_GlobNut_subsampled.rds")
