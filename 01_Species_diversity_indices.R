@@ -67,10 +67,23 @@ grass_globnut <- spec %>%
   group_by(plot_ID, grass, .drop = FALSE) %>% 
   summarise(grass_cover = sum(cover)) %>% 
   filter(grass == "Grass") %>% 
-  select(plot_ID, grass_cover)
+  dplyr::select(plot_ID, grass_cover)
 
+## Percentage forbs
+forb_globnut <- spec %>% 
+  #  to 100 %
+  group_by(plot_ID) %>% 
+  mutate(covertot = sum(cover), cover = cover/covertot) %>% 
+  # create grouping column for forb
+  mutate(forb = ifelse(family_new %in% 
+                         c("Poaceae", "Juncaceae","Cyperaceae"), 
+                       "Not forb", "Forb") %>% as.factor(.)) %>% 
+  group_by(plot_ID, forb, .drop = FALSE) %>% 
+  summarise(forb_cover = sum(cover)) %>% 
+  filter(forb == "Forb") %>% 
+  dplyr::select(plot_ID, forb_cover)
 spec_ric <- spec_ric %>% 
-  left_join(grass_globnut, by = "plot_ID") 
+  left_join(grass_globnut, by = "plot_ID") %>% 
+  left_join(forb_globnut, by = "plot_ID")
 
 saveRDS(spec_ric, "Outputs/01_Species_indices.rds")
-
