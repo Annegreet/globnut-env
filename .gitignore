@@ -6,6 +6,9 @@
 .png
 .docx
 .csv
+.html
+.xlsx
+
 
 # ignore everything in Outputs (only to be kept locally)
 /outputs/**
