@@ -1,6 +1,6 @@
 ## ---------------------------
 ##
-## Script name: 01_Plot_selection.R
+## Script name: 02_Plot_selection.R
 ##
 ## Purpose of script: Plot selection for further analysis 
 ##
@@ -16,6 +16,7 @@
 ##  
 ## References:
 ## Augusto, L., Achat, D. L., Jonard, M., Vidal, D. & Ringeval, B. (2017). Soil parent material—A major driver of plant nutrient limitations in terrestrial ecosystems. Global Change Biology, 23(9), 3808–3824. https://doi.org/10.1111/gcb.13691
+## Palpurina, S., Chytrý, M., Hölzel, N., Tichý, L., Wagner, V., Horsák, M., Axmanová, I., Hájek, M., Hájková, P., Freitag, M., Lososová, Z., Mathar, W., Tzonev, R., Danihelka, J. & Dřevojan, P. (2019). The type of nutrient limitation affects the plant species richness–productivity relationship: Evidence from dry grasslands across Eurasia. Journal of Ecology, 107(3), 1038–1050. https://doi.org/10.1111/1365-2745.13084
 ## ---------------------------
 
 ## Load packages
@@ -33,8 +34,7 @@ bed <-  read.csv(paste0(data_dir, "lithology.csv")) %>%
   # simplify lithology category same way as Augusto et al (2017)
   mutate(lith_simp = case_when(lith %in% c("pa", "ss", "va", "su") ~ "acid",
                                lith %in% c("mt", "vi") ~ "intermediate",
-                               lith %in% c("pb", "vb") ~ "mafic",
-                               lith %in% c("sc", "sm") ~ "calcareous")) 
+                               lith %in% c("sc", "sm","pb", "vb") ~ "well-buffered")) 
 # response
 npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>% 
   # add column with nutrient limitation
@@ -56,7 +56,7 @@ grid <- readRDS("outputs/01_Globnut_grid_res15.rds") %>%
 spec <- readRDS("outputs/01_Species_indices.rds")
 
 # dataframe for analysis
-globnut <- grid %>%
+globnut_raw <- grid %>%
   # Join datasets
   left_join(spec, by = c("plot_ID")) %>% 
   left_join(npk, by = "plot_ID") %>% 
@@ -64,13 +64,17 @@ globnut <- grid %>%
   left_join(ndep, by = "plot_ID") %>% 
   left_join(age, by = "plot_ID") %>% 
   left_join(meta, by = "plot_ID") %>% 
-  left_join(bed, by = "plot_ID") %>% 
+  left_join(bed, by = "plot_ID")  %>% 
+  # globnut plots with complete data
+  drop_na(lat, spec_ric, biomass, N, P)
+
+globnut <- globnut_raw %>% 
   # filter plots that have been fertilized
-  filter(!harm_fert_appl %in% c(1,2))  %>% 
+  filter(!harm_fert_appl %in% c(1,2)) %>% 
   # select relevant columns
   dplyr::select(plot_ID, country, cell, plot_size, sample_year = year, lat, lon,
                 spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
-                ndep = sum_5yr, MAT, MAP, N, P, K, NP, lim, biomass) %>% 
+                ndep = sum_5yr, MAT, MAP, PET, AI, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year) %>% 
   # filter K-limited and unclear limitation plots
@@ -104,3 +108,31 @@ globnut_samp <- globnut %>%
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
 saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled16.rds")
+
+# check effect of ndeposition cummulative 10
+globnut <- grid %>%
+  # Join datasets
+  left_join(spec, by = c("plot_ID")) %>% 
+  left_join(npk, by = "plot_ID") %>% 
+  left_join(clim, by = "plot_ID") %>% 
+  left_join(ndep, by = "plot_ID") %>% 
+  left_join(age, by = "plot_ID") %>% 
+  left_join(meta, by = "plot_ID") %>% 
+  left_join(bed, by = "plot_ID") %>% 
+  # filter plots that have been fertilized
+  filter(!harm_fert_appl %in% c(1,2))  %>% 
+  # select relevant columns
+  dplyr::select(plot_ID, country, cell, plot_size, sample_year = year,
+                lat, lon,spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
+                ndep = sum_10yr, MAT, MAP, N, P, K, NP, lim, biomass) %>% 
+  # keep only plots with complete data
+  drop_na(-plot_size, -sample_year) %>% 
+  # filter K-limited and unclear limitation plots
+  filter(!lim %in% c("Unclear",  "K(co)-limitation")) %>% 
+  # filter out outliers with high biomass (potential filter)
+  mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) %>% 
+  filter(z_biomass < 4) %>% 
+  dplyr::select(-z_biomass) %>% 
+  group_by(cell) %>%
+  slice_sample(n = 5, replace = FALSE)
+saveRDS(globnut, "outputs/02_GlobNut_subsampled_ndep10yr.rds")
