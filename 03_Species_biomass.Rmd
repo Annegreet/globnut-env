@@ -19,9 +19,10 @@ if(!require(ggeffects)) install.packages("ggeffects")
 if(!require(multcompView)) install.packages("multcompView")
 if(!require(MASS)) install.packages("MASS")
 if(!require(knitr)) install.packages("knitr")
+if(!require(DHARMa)) install.packages("DHARMa")
 
 ## Load data
-globnut <- readRDS("outputs/01_GlobNut_subsampled.rds")
+globnut <- readRDS("outputs/02_GlobNut_subsampled.rds")
 globnut <- globnut %>%
   mutate(lim = factor(lim, levels = c("No limitation by N, P, K", 
                                       "N-limitation",
@@ -48,7 +49,7 @@ sig_lab <- globnut %>%
             n_obs = n()) %>% 
   left_join(let, by = "lim")
 
-ggplot(globnut, aes(x = lim, y = biomass)) +
+bio <- ggplot(globnut, aes(x = lim, y = biomass)) +
   geom_boxplot(fill = NA, width = 0.2) +
   geom_violin(alpha = 0.3) +
   geom_text(data = sig_lab, aes(x = lim, y = mean , label = sig_let)) +
@@ -69,7 +70,7 @@ sig_lab <- globnut %>%
             n_obs = n()) %>% 
   left_join(let, by = "lim")
 
-ggplot(globnut, aes(x = lim, y = spec_ric)) +
+sr <- ggplot(globnut, aes(x = lim, y = spec_ric)) +
   geom_boxplot(fill = NA, width = 0.2) +
   geom_violin(alpha = 0.3) +
   geom_text(data = sig_lab, aes(x = lim, y = mean , label = sig_let)) +
@@ -89,7 +90,7 @@ sig_lab <- globnut %>%
             n_obs = n()) %>% 
   left_join(let, by = "lim")
 
-ggplot(globnut, aes(x = lim, y = grass_cover)) +
+grass <- ggplot(globnut, aes(x = lim, y = grass_cover)) +
   geom_boxplot(fill = NA, width = 0.2) +
   geom_violin(alpha = 0.3) +
   geom_text(data = sig_lab, aes(x = lim, y = mean , label = sig_let)) +
@@ -110,7 +111,7 @@ sig_lab <- globnut %>%
             n_obs = n()) %>% 
   left_join(let, by = "lim")
 
-ggplot(globnut, aes(x = lim, y = forb_cover)) +
+forb <- ggplot(globnut, aes(x = lim, y = forb_cover)) +
   geom_boxplot(fill = NA, width = 0.2) +
   geom_violin(alpha = 0.3) +
   geom_text(data = sig_lab, aes(x = lim, y = mean, 
@@ -118,34 +119,40 @@ ggplot(globnut, aes(x = lim, y = forb_cover)) +
   scale_x_discrete("") +
   scale_y_continuous("Forb cover (%)") +
   theme_bw()
+
+box_lim <- grid.arrange(bio, sr, grass, forb)
+ggsave("figures/fig3-boxplots.png", box_lim,  width = 174, height = 174, units = "mm", dpi = 600)
 ```
+
 ## Species richness \~ Biomass relationship by nutrient limitation
 
 -   Generalised linear model with linear and quadratic terms for biomass, plus their interaction with the nutrient limitations + plot size
 -   negative binomial distribution
 
-```{r fig.height=9}
-globnut <- globnut %>% 
-  mutate(biomass_centered = biomass - mean(biomass))
+```{r echo=TRUE, fig.height=9}
+
 spec_bio <- glm.nb(spec_ric ~ lim + biomass + I(biomass^2) +
                 biomass*lim + I(biomass^2)*lim + plot_size, 
                 data = globnut)
 
-check_model(spec_bio)
+windows();check_model(spec_bio)
 
 # test for overdispersion
-# library(DHARMa)
-# testDispersion(spec_bio, alternative = "greater", plot = TRUE)
+testDispersion(spec_bio, plot = TRUE)
 ```
 
 ```{r fig.height=5}
-ggpredict(spec_bio, terms = c("biomass", "lim")) %>% 
-  plot(.)
+ggpredict(spec_bio, terms = c("biomass [all]", "lim [all]")) %>% 
+  plot(.) +
+  ggtitle("") +
+  xlab("Biomass (g/m2)") +
+  ylab("Species richness") +
+  theme(legend.title = element_blank())
 ggpredict(spec_bio, terms = c("biomass", "lim")) %>% 
   plot(.,  show_residuals = TRUE) +
   scale_y_continuous(limits = c(0,200)) 
-# ggpredict(spec_bio, terms = "plot_size [all]") %>% 
-#   plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
+ggpredict(spec_bio, terms = "plot_size [all]") %>%
+  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
 ggplot(globnut, aes(x = biomass, y = spec_ric, 
                     col = plot_size)) +
   geom_point() +
@@ -165,3 +172,16 @@ kable(glm_coef)
 ```
 
 R-square = `r r2_kullback(spec_bio) %>% round(digits = 2)`
+
+```{r}
+pred <- ggpredict(spec_bio, terms = c("biomass [all]", "lim [all]"))
+sr <- pred %>% 
+  group_by(group) %>% 
+  summarise(max_sr = max(predicted) %>% round(),
+            ci_low = nth(conf.low, which.max(predicted)) %>% round,
+            ci_high = nth(conf.high, which.max(predicted)) %>% round,
+            max_biomass = nth(x, which.max(predicted)) %>% round())
+```
+
+Following Palpurina et al. (2019) we tested if the species richness-biomass relationship is influenced by the type of nutrient limitation, now extending the biomass gradient from 500 to 1400 mg/m2. Irrespective of the type of nutrient limitation (except no limitation) we find the hump-backed shaped relationship between biomass and species richness (Grime). In line with Palpurina et al. (2019)?, the species richness peak is reached at lower biomass values for P limitation (`r sr$max_biomass[sr$group == "P limitation"]` mg/m2) than with co-limitation and N limitation (`r sr$max_biomass[sr$group == "Colimitation N:P"]` and `r sr$max_biomass[sr$group == "N limitation"]` mg/m2, respectively).\
+Also in line with Palpurina et al. (2019), we see that the increase in species richness with biomass is steeper with co-limitation and P-limitation than with N-limitation. This leads to higher optimum in species richness in co-limited ecosystems than in the other types of nutrient limitation (`r sr$max_sr[sr$group == "Colimitation N:P"]` species, 95% confidence interval [`r sr$ci_low[sr$group == "Colimitation N:P"]` ,`r sr$ci_high[sr$group == "Colimitation N:P"]`]). The maximum species richness in P-limited ecosystems is lower than co-limited ecosystems (`r sr$max_sr[sr$group == "P limitation"]`, [`r sr$ci_low[sr$group == "P limitation"]` ,`r sr$ci_high[sr$group == "P limitation"]`]) and significantly higher than N-limited ecosystem (`r sr$max_sr[sr$group == "N limitation"]`, [`r sr$ci_low[sr$group == "N limitation"]` ,`r sr$ci_high[sr$group == "N limitation"]`]). We observe a decline in species richness with further increases in biomass. However, this decrease is stronger for co-limited and P-limited ecosystems than for N-limited ecosystems. This relative difference in decrease of species richness between co-limited and P-limited on one hand and N-limited ecosystems on the other ultimately leads to crossing the lines. Leading to the fact that highly productive ecosystem have higher species richness under N-limitation than under co-limitation or P-limitation
