@@ -226,34 +226,6 @@
       ],
       "Hash": "5b250ad4c5863ee4a68e280fcb0a3600"
     },
-    "TMB": {
-      "Package": "TMB",
-      "Version": "1.9.6",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "Matrix",
-        "R",
-        "RcppEigen",
-        "graphics",
-        "methods",
-        "stats",
-        "utils"
-      ],
-      "Hash": "b062cb79db56803311ea22b90ed6f57a"
-    },
-    "TNRS": {
-      "Package": "TNRS",
-      "Version": "0.3.4",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "httr",
-        "jsonlite"
-      ],
-      "Hash": "37097078c13a8716446a5ca67fc56915"
-    },
     "abind": {
       "Package": "abind",
       "Version": "1.4-5",
@@ -623,6 +595,23 @@
       ],
       "Hash": "bb097fccb22d156624fd07cd2894ddb6"
     },
+    "cowplot": {
+      "Package": "cowplot",
+      "Version": "1.1.1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "ggplot2",
+        "grDevices",
+        "grid",
+        "gtable",
+        "methods",
+        "rlang",
+        "scales"
+      ],
+      "Hash": "b418e8423699d11c7f2087c2bfd07da2"
+    },
     "cpp11": {
       "Package": "cpp11",
       "Version": "0.4.6",
@@ -859,23 +848,6 @@
       ],
       "Hash": "1046cb48d06cb40c2900d8878f03a0fe"
     },
-    "effectsize": {
-      "Package": "effectsize",
-      "Version": "0.8.6",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "bayestestR",
-        "datawizard",
-        "insight",
-        "parameters",
-        "performance",
-        "stats",
-        "utils"
-      ],
-      "Hash": "ba2ebc5b29c95b3f99d022333e8aad5f"
-    },
     "ellipsis": {
       "Package": "ellipsis",
       "Version": "0.3.2",
@@ -950,30 +922,6 @@
       "Source": "Repository",
       "Repository": "RSPM",
       "Hash": "f7736a18de97dea803bde0a2daaafb27"
-    },
-    "fishualize": {
-      "Package": "fishualize",
-      "Version": "0.2.3",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "curl",
-        "downloader",
-        "dplyr",
-        "ggplot2",
-        "grid",
-        "gridExtra",
-        "httr",
-        "magrittr",
-        "png",
-        "rlang",
-        "scales",
-        "stringr",
-        "tidyr",
-        "utils"
-      ],
-      "Hash": "f5285d0cf9c7fa53495ba4b04d5865e2"
     },
     "fontawesome": {
       "Package": "fontawesome",
@@ -1143,24 +1091,6 @@
         "withr"
       ],
       "Hash": "85846544c596e71f8f46483ab165da33"
-    },
-    "glmmTMB": {
-      "Package": "glmmTMB",
-      "Version": "1.1.8",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "Matrix",
-        "R",
-        "RcppEigen",
-        "TMB",
-        "lme4",
-        "methods",
-        "mgcv",
-        "nlme",
-        "numDeriv"
-      ],
-      "Hash": "ddc0099666aba16c7db48556ff1bc2f6"
     },
     "glue": {
       "Package": "glue",
@@ -1699,6 +1629,16 @@
       ],
       "Hash": "2688bf2f8d54c19534ee7d8a876d9fc7"
     },
+    "multcompView": {
+      "Package": "multcompView",
+      "Version": "0.1-9",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "grid"
+      ],
+      "Hash": "a453bb54107d6ff5fb4280729e15a023"
+    },
     "munsell": {
       "Package": "munsell",
       "Version": "0.5.0",
@@ -1812,23 +1752,37 @@
       ],
       "Hash": "7bca0c1c6f188b195a5f380b8e73b91a"
     },
-    "patchwork": {
-      "Package": "patchwork",
-      "Version": "1.1.3",
+    "partR2": {
+      "Package": "partR2",
+      "Version": "0.9.1",
       "Source": "Repository",
       "Repository": "RSPM",
       "Requirements": [
-        "cli",
+        "R",
+        "dplyr",
         "ggplot2",
-        "grDevices",
-        "graphics",
-        "grid",
-        "gtable",
+        "lme4",
+        "magrittr",
+        "methods",
+        "pbapply",
+        "purrr",
         "rlang",
         "stats",
-        "utils"
+        "tibble",
+        "tidyr"
       ],
-      "Hash": "c5754106c02e8e019941100c81149431"
+      "Hash": "e8d3adb6bf97662d6113c4c7cf003521"
+    },
+    "pbapply": {
+      "Package": "pbapply",
+      "Version": "1.7-2",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "parallel"
+      ],
+      "Hash": "68a2d681e10cf72f0afa1d84d45380e5"
     },
     "pbkrtest": {
       "Package": "pbkrtest",
@@ -1985,16 +1939,6 @@
         "Rcpp"
       ],
       "Hash": "6b8177fd19982f0020743fadbfdbd933"
-    },
-    "png": {
-      "Package": "png",
-      "Version": "0.1-8",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R"
-      ],
-      "Hash": "bd54ba8a0a5faded999a7aab6e46b374"
     },
     "praise": {
       "Package": "praise",
@@ -2496,102 +2440,6 @@
         "shiny"
       ],
       "Hash": "802e4786b353a4bb27116957558548d5"
-    },
-    "sjPlot": {
-      "Package": "sjPlot",
-      "Version": "2.8.15",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "MASS",
-        "R",
-        "bayestestR",
-        "datawizard",
-        "dplyr",
-        "ggeffects",
-        "ggplot2",
-        "grDevices",
-        "graphics",
-        "insight",
-        "knitr",
-        "parameters",
-        "performance",
-        "purrr",
-        "rlang",
-        "scales",
-        "sjlabelled",
-        "sjmisc",
-        "sjstats",
-        "stats",
-        "tidyr",
-        "utils"
-      ],
-      "Hash": "65a2fa814dabacc0c5037ef36c2470f0"
-    },
-    "sjlabelled": {
-      "Package": "sjlabelled",
-      "Version": "1.2.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "datawizard",
-        "insight",
-        "stats",
-        "tools",
-        "utils"
-      ],
-      "Hash": "4bd18166ef8ca74aeec74ad295dfe77f"
-    },
-    "sjmisc": {
-      "Package": "sjmisc",
-      "Version": "2.8.9",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "dplyr",
-        "insight",
-        "magrittr",
-        "methods",
-        "purrr",
-        "rlang",
-        "sjlabelled",
-        "stats",
-        "tidyselect",
-        "utils"
-      ],
-      "Hash": "86176cb3be04b2930649dce2bf56d3cb"
-    },
-    "sjstats": {
-      "Package": "sjstats",
-      "Version": "0.18.2",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "MASS",
-        "R",
-        "bayestestR",
-        "broom",
-        "datawizard",
-        "dplyr",
-        "effectsize",
-        "emmeans",
-        "insight",
-        "lme4",
-        "magrittr",
-        "modelr",
-        "parameters",
-        "performance",
-        "purrr",
-        "rlang",
-        "sjlabelled",
-        "sjmisc",
-        "stats",
-        "tidyr",
-        "utils"
-      ],
-      "Hash": "9e17bcae16a0d18b5f4f126298bd6f45"
     },
     "sourcetools": {
       "Package": "sourcetools",

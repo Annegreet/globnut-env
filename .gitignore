@@ -14,5 +14,7 @@
 /outputs/**
 # ignore everything in Figures (only to be kept locally)
 /figures/**
-# ignore everything in Figures (only to be kept locally)
+# ignore everything in reports (only to be kept locally)
 /reports/**
+# ignore everything in retired_files (only to be kept locally)
+/retired_scripts/**
