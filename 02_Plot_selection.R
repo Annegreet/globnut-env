@@ -35,6 +35,9 @@ bed <-  read.csv(paste0(data_dir, "lithology.csv")) %>%
   mutate(lith_simp = case_when(lith %in% c("pa", "ss", "va", "su") ~ "acid",
                                lith %in% c("mt", "vi") ~ "intermediate",
                                lith %in% c("sc", "sm","pb", "vb") ~ "well-buffered")) 
+elev <- read.csv(paste0(data_dir, "GlobNut1.0_env_variable.csv")) %>% 
+  mutate(elev = ifelse(is.na(nasa_elev), arcticdem_elev, nasa_elev)) %>% 
+  dplyr::select(plot_ID,elev)
 # response
 npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>% 
   # add column with nutrient limitation
@@ -65,6 +68,7 @@ globnut_raw <- grid %>%
   left_join(age, by = "plot_ID") %>% 
   left_join(meta, by = "plot_ID") %>% 
   left_join(bed, by = "plot_ID")  %>% 
+  left_join(elev, by = "plot_ID") %>% 
   # globnut plots with complete data
   drop_na(lat, spec_ric, biomass, N, P)
 
@@ -72,9 +76,9 @@ globnut <- globnut_raw %>%
   # filter plots that have been fertilized
   filter(!harm_fert_appl %in% c(1,2)) %>% 
   # select relevant columns
-  dplyr::select(plot_ID, country, cell, plot_size, sample_year = year, lat, lon,
+  dplyr::select(plot_ID, country, cell, plot_size, sample_year = year, lat, lon, elev,
                 spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
-                ndep = sum_5yr, MAT, MAP, PET, AI, N, P, K, NP, lim, biomass) %>% 
+                ndep = sum_5yr, MAT, MAP, PET, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year) %>% 
   # filter K-limited and unclear limitation plots
@@ -123,8 +127,8 @@ globnut <- grid %>%
   filter(!harm_fert_appl %in% c(1,2))  %>% 
   # select relevant columns
   dplyr::select(plot_ID, country, cell, plot_size, sample_year = year,
-                lat, lon,spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
-                ndep = sum_10yr, MAT, MAP, N, P, K, NP, lim, biomass) %>% 
+                lat, lon, elev, spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
+                ndep = sum_10yr, MAT, MAP,PET, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year) %>% 
   # filter K-limited and unclear limitation plots
