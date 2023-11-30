@@ -23,7 +23,6 @@ options(scipen = 6, digits = 4) # avoid scientific notation
 ## Load packages
 if(!require(tidyverse)) install.packages("tidyverse")
 
-
 ## Load data
 data_dir <- "Z:/_GLOBNUT1.0/"
 cont <- read.csv(paste0(data_dir, "GlobNut1.0_contributors.csv"), sep = ";")
