@@ -18,3 +18,7 @@
 /reports/**
 # ignore everything in retired_files (only to be kept locally)
 /retired_scripts/**
+# ignore everything in env_data/outputs (only to be kept locally)
+/env_data/outputs/**
+# ignore everything in notes (only to be kept locally)
+/notes/**
