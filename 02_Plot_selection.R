@@ -25,7 +25,7 @@ if(!require(tidyverse)) install.packages("tidyverse")
 ## Load data
 data_dir <- "Z:/_GlobNut1.0/"
 # Predictors
-ndep <- read.csv(paste0(data_dir, "Ndeposition.csv"))
+ndep <- read.csv(paste0(data_dir, "ndeposition.csv"))
 clim <- read.csv(paste0(data_dir, "ERA5_climate.csv"))
 age <- read.csv(paste0(data_dir, "soilage.csv")) %>% 
   dplyr::select(-lat, -lon)
@@ -38,6 +38,7 @@ bed <-  read.csv(paste0(data_dir, "lithology.csv")) %>%
 elev <- read.csv(paste0(data_dir, "GlobNut1.0_env_variable.csv")) %>% 
   mutate(elev = ifelse(is.na(nasa_elev), arcticdem_elev, nasa_elev)) %>% 
   dplyr::select(plot_ID,elev)
+
 # response
 npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>% 
   # add column with nutrient limitation
@@ -70,31 +71,32 @@ globnut_raw <- grid %>%
   left_join(bed, by = "plot_ID")  %>% 
   left_join(elev, by = "plot_ID") %>% 
   # globnut plots with complete data
-  drop_na(lat, spec_ric, biomass, N, P)
+  drop_na(lon,lat, spec_ric, biomass, N, P) 
+saveRDS(globnut_raw, "outputs/02_Globnut_raw.rds")
 
 globnut <- globnut_raw %>% 
   # filter plots that have been fertilized
   filter(!harm_fert_appl %in% c(1,2)) %>% 
   # select relevant columns
   dplyr::select(plot_ID, country, cell, plot_size, sample_year = year, lat, lon, elev,
-                spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
+                spec_ric, q1, q2,  pilou_eve, soil_age, lith_simp, 
                 ndep = sum_5yr, MAT, MAP, PET, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
-  drop_na(-plot_size, -sample_year) %>% 
+  drop_na(-plot_size, -sample_year,-elev,-MAT,-MAP,-PET) %>% 
   # filter K-limited and unclear limitation plots
-  filter(!lim %in% c("Unclear",  "K(co)-limitation")) %>% 
+  filter(!lim %in% c("Unclear",  "K(co)-limitation", "No limitation N, P, K")) %>% 
   # filter out outliers with high biomass (potential filter)
   mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
   dplyr::select(-z_biomass)
-saveRDS(globnut, "outputs/02_GlobNut.rds")
+# saveRDS(globnut, "outputs/02_GlobNut.rds")
 
 # sub sampled data set to check the effect of oversample areas - 5 per cell
 set.seed(123)
 globnut_samp <- globnut %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled.rds")
+# saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled.rds")
 
 # check for effect of grid size
 grid14 <- readRDS("outputs/01_Globnut_grid_res14.rds")
@@ -103,7 +105,7 @@ globnut_samp <- globnut %>%
   left_join(grid14, by = c("plot_ID" = "globnut.plot_ID")) %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled14.rds")
+# saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled14.rds")
 
 grid16 <- readRDS("outputs/01_Globnut_grid_res16.rds")
 globnut_samp <- globnut %>%
@@ -111,7 +113,7 @@ globnut_samp <- globnut %>%
   left_join(grid16, by = c("plot_ID" = "globnut.plot_ID")) %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled16.rds")
+# saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled16.rds")
 
 # check effect of ndeposition cummulative 10
 globnut <- grid %>%
@@ -127,7 +129,7 @@ globnut <- grid %>%
   filter(!harm_fert_appl %in% c(1,2))  %>% 
   # select relevant columns
   dplyr::select(plot_ID, country, cell, plot_size, sample_year = year,
-                lat, lon, elev, spec_ric, grass_cover, forb_cover, pilou_eve, soil_age, lith_simp, 
+                lat, lon, spec_ric,  pilou_eve, soil_age, lith_simp, 
                 ndep = sum_10yr, MAT, MAP,PET, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year) %>% 
@@ -139,4 +141,4 @@ globnut <- grid %>%
   dplyr::select(-z_biomass) %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-saveRDS(globnut, "outputs/02_GlobNut_subsampled_ndep10yr.rds")
+# saveRDS(globnut, "outputs/02_GlobNut_subsampled_ndep10yr.rds")

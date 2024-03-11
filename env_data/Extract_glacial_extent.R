@@ -94,7 +94,7 @@ file_paths <- list.files("Z:/geo_data/Glacial_extent/", recursive = TRUE, includ
 glac <- vect(file_paths[7]) %>% terra::union()
 # reproject plot coordinates to crs of shape files
 plot_coord <- meta %>%
-  select(plot_ID, lon, lat) %>%
+  dplyr::select(plot_ID, lon, lat) %>%
   na.omit() %>%
   # convert to vector
   vect(., geom = c("lon", "lat"), crs = "epsg:4326") %>%
@@ -167,5 +167,5 @@ age <- chelsa_lgm %>%
   mutate(soil_age = case_when(lgm_glacial_extent < 21000 ~ "1", # 21 000 years or less
                               last_glac %in% c("30ka","35ka","40ka","MIS4","Mis5a","Mis5b","MIS5c","MIS5d", "MIS6","MIS8", "MIS10", "MIS12") ~ "2", #30ka and 4770000 
                               is.na(last_glac) ~ "3")) # older than 477000
-write.csv(age, "Z:/_GLOBNUT1.0/soilage.csv")
+write.csv(age, "Z:/_GLOBNUT1.0/soilage.csv", row.names = FALSE, fileEncoding = "UTF-8")
 saveRDS(age, "env_data/outputs/Soilage.rds")

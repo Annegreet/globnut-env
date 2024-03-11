@@ -1,5 +1,5 @@
 ---
-title: "Linear mixed models"
+title: "N-dep effect on vegetation indices"
 author: "Annegreet Veeken"
 date: "`r Sys.Date()`"
 output:
@@ -7,609 +7,639 @@ output:
 params: 
   data: "outputs/02_GlobNut_subsampled.rds"
 ---
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo=FALSE, fig.height=4, fig.width=4, message=FALSE, warning=FALSE)
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	fig.height = 4,
+	fig.width = 4,
+	message = FALSE,
+	warning = FALSE,
+	include = FALSE
+)
 ## Load packages
 if(!require(tidyverse)) install.packages("tidyverse")
 if(!require(vegan)) install.packages("vegan")
-if(!require(performance)) install.packages("performance")
-if(!require(parameters)) install.packages("parameters")
-if(!require(ggeffects)) install.packages("ggeffects")
+if(!require(easystats)) install.packages("easystats")
 if(!require(lme4)) install.packages("lme4")
 if(!require(knitr)) install.packages("knitr")
-if(!require(insight)) install.packages("insight")
-if(!require(partR2)) install.packages("partr2")
 if(!require(scales)) install.packages("scales")
-if(!require(cowplot)) install.packages("cowplot")
 if(!require(gridExtra)) install.packages("gridExtra")
+if(!require(MuMIn)) install.packages("MuMIn")
+if(!require(cowplot)) install.packages("cowplot")
 
 ## Load data
 globnut <- readRDS(params$data) %>% ungroup() %>% 
+    filter(!lim == "No limitation by N, P, K") %>% 
+   dplyr::filter(between(lat, 35, 75)) %>% 
+  dplyr::filter(between(lon, -25, 150)) %>% 
   mutate(soil_age = factor(soil_age, levels = c("1", "2", "3")),
          lith_simp = factor(lith_simp, levels = c("acid", "intermediate",
                                                   "well-buffered")))  %>% 
+  drop_na %>% 
   mutate(N_biomass = N * biomass,
          P_biomass = P * biomass,
-         ndep = log(ndep)) %>% 
-  filter(biomass > 10) %>% 
-  drop_na()
+         ndep = log(ndep*10), # to g/ha en log
+         ndep_cent = ndep - mean(ndep),
+         MAP = log(MAP),
+         NP = log(NP),
+         MAP_cent = MAP - mean(MAP),
+         PET_cent = PET - mean(PET),
+         MAT_cent = MAT - mean(MAT),
+         NP_cent = NP - mean(NP),
+         biomass_cent = biomass - mean(biomass),
+         lim = as.factor(lim)) 
 
-n_boot <- 10
+# global model
+fm <- "MAT_cent + I(MAT_cent^2) + MAP_cent + I(MAP_cent^2) + PET_cent + I(PET_cent^2) + ndep_cent + I(ndep_cent^2)  + NP_cent + I(NP_cent^2)"
 
-# formula for predictors
-pred <- "MAT + I(MAT^2)  + MAP + PET + ndep + soil_age + lith_simp + elev + (1|cell)"
-# batches for partitioning of r2
-batch <- list(clim = c("MAT", "MAP", "I(MAT^2)", "PET"),
-               geo = c("soil_age", "lith_simp"),
-               ndep = "ndep")
+# Define subset criteria for model selection: quadratic terms can only be included if linear terms are included as well
+sb <- expression(dc(MAT_cent, `I(MAT_cent^2)`) && dc(MAP_cent,`I(MAP_cent^2)`) && 
+                   dc(PET_cent,`I(PET_cent^2)`)  && dc(biomass_cent,`I(biomass_cent^2)`) && 
+                   dc(ndep_cent, `I(ndep_cent^2)`) && dc(`lim:ndep_cent`, `I(ndep_cent^2):lim`))
+sb <- expression(MAT_cent & MAP_cent & PET_cent & NP_cent & ndep_cent)
+
 colours <- brewer_pal(palette = "GnBu")(5) %>% rev()
-names(colours) <- c("clim", "geo", "ndep", "random", "unexplained")
+colours_lim <- c('#1b9e77','#d95f02','#7570b3')
+names(colours) <- c("clim", "geo", "ndep", "random", "lim")
+
+# cor(globnut[, c("MAT", "MAP", "PET", "ndep")]) %>% kable()
 ```
 
+## Biomass
 
 ```{r fig.height=8, fig.width=7, include=FALSE}
-full_model_biomass <- lmer(formula(paste("log(biomass) ~", pred)), data = globnut)
-windows();check_model(full_model_biomass)
+full_model_biomass <- lmer(formula(paste("log(biomass) ~", fm, 
+                                         "+ (1|cell)")), 
+                           data = globnut, 
+                           na.action = "na.fail")
+check_model(full_model_biomass)
 
 check_heteroscedasticity(full_model_biomass)
 check_outliers(full_model_biomass)
+check_collinearity(full_model_biomass)
 
-globnut %>% mutate(resi = residuals(full_model_biomass)) %>% view
+# Generate all possible model combinations
+model_combinations <- dredge(full_model_biomass, subset = sb)
+
+# get top model
+fm_biomass <- formula(get.models(model_combinations, subset = 1)[[1]])
+
+best_model_biomass <- lmer(fm_biomass, data = globnut)
+check_model(best_model_biomass)
+
+check_heteroscedasticity(best_model_biomass)
+check_outliers(best_model_biomass)
+check_collinearity(best_model_biomass)
 ```
 
-```{r eval=FALSE, include=FALSE}
-ggpredict(full_model_biomass, terms = "MAT [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_biomass, terms = "MAP [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_biomass, terms = "ndep [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_biomass, terms = "soil_age [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_biomass, terms = "lith_simp") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-
-```
-
-
-```{r include=FALSE}
-biomass_limits <- c(0, 550) 
-
-(biomass_mat <- ggpredict(full_model_biomass, terms = "MAT [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
-  xlab("MAT (°C)") +  
-  theme_bw())
-(biomass_map <- ggpredict(full_model_biomass, terms = "MAP [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
-  xlab("MAP (mm/yr)") +  
-  theme_bw())
-(biomass_pet <- ggpredict(full_model_biomass, terms = "PET [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
-  xlab("PET (mm/yr)") +  
-  theme_bw())
-(biomass_age <- ggpredict(full_model_biomass, terms = "soil_age [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
-  xlab("soil age") +  
-  theme_bw())
-(biomass_lith <- ggpredict(full_model_biomass, terms = "lith_simp [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
-   scale_x_discrete("Soil parent material", labels = c("acid" = "acid",
-                                                      "intermediate" = "inter",
-                                                      "calcareous" = "calc",
-                                                      "mafic" = "mafic")) +
-  theme_bw())
-(biomass_ndep <- ggpredict(full_model_biomass, terms = "ndep [all]") %>% 
-  ggplot(aes(x = exp(x), y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["ndep"]) +
-    geom_line(colour = colours["ndep"], linewidth = 1) +
-  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
-  xlab("N-deposition (g/ha)") +  
-  theme_bw())
-
-```
-
-```{r echo=FALSE, fig.height=5, fig.width=5}
-r2_biomass <- r2(full_model_biomass)
-
-res <- partR2(full_model_biomass, 
-              R2_type = "marginal",
-              nboot = n_boot, # set t0 1000 for final analysis
-              partbatch = batch,
-              allow_neg_r2 = TRUE)
-
-part_r2_biomass <- res$R2 %>% 
-  filter(term %in% c("geo","ndep","clim")) %>% 
-  dplyr::select(term, estimate, CI_lower, CI_upper) %>% 
-  add_row(term = c("random", "unexplained"),
-          estimate = c(r2_biomass$R2_conditional- r2_biomass$R2_marginal,
-                   1 - r2_biomass$R2_conditional)) %>% 
-  # filter(!term == "unexplained") %>% 
-  mutate(ymax = cumsum(estimate),
-         ymin = lag(ymax, default = 0)) 
-
-
-```
-
-
-
-```{r fig.height=7, fig.width=7, include=FALSE}
-full_model_N <- lmer(formula(paste("log(N_biomass) ~", pred)),
-                     data = globnut)
-check_model(full_model_N)
-
-check_heteroscedasticity(full_model_N)
-check_outliers(full_model_N)
-```
-
-```{r eval=FALSE, include=FALSE}
-ggpredict(full_model_N, terms = "MAT [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_N, terms = "MAP [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_N, terms = "ndep [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_N, terms = "soil_age [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_N, terms = "lith_simp") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-```
-
-```{r include=FALSE}
-n_limits <- c(0, 800) 
-
-(n_mat <- ggpredict(full_model_N, terms = "MAT [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("N (g/m2)",limits = n_limits) +
-  xlab("MAT (°C)") +  
-  theme_bw())
-(n_map <- ggpredict(full_model_N, terms = "MAP [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("N (g/m2)",limits = n_limits) +
-  xlab("MAP (mm/yr)") +  
-  theme_bw())
-(n_pet <- ggpredict(full_model_N, terms = "PET [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("N (g/m2)",limits = n_limits) +
-  xlab("PET (mm/yr)") +  
-  theme_bw())
-(n_age <- ggpredict(full_model_N, terms = "soil_age [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("N (g/m2)",limits = n_limits) +
-  xlab("soil age") +  
-  theme_bw())
-(n_lith <- ggpredict(full_model_N, terms = "lith_simp [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("N (g/m2)",limits = n_limits) +
-  scale_x_discrete("Soil parent material", labels = c("acid" = "acid",
-                                                      "intermediate" = "inter",
-                                                      "calcareous" = "calc",
-                                                      "mafic" = "mafic")) +
-  theme_bw())
-(n_ndep <- ggpredict(full_model_N, terms = "ndep [all]") %>% 
-  ggplot(aes(x = exp(x), y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["ndep"]) +
-    geom_line(colour = colours["ndep"], linewidth = 1) +
-  scale_y_continuous("N (g/m2)",limits = n_limits) +
-  xlab("N-deposition (g/ha)") +  
-  theme_bw())
-
-```
-
-```{r echo=FALSE, fig.height=5, fig.width=5}
-r2_n <- r2(full_model_N)
-res <- partR2(full_model_N, 
-              R2_type = "marginal",
-              nboot = n_boot, # set t0 1000 for final analysis
-              partbatch = batch,
-              allow_neg_r2 = TRUE)
-
-part_r2_n <- res$R2 %>% 
-  filter(term %in% c("geo","ndep","clim")) %>% 
-  dplyr::select(term, estimate, CI_lower, CI_upper) %>% 
-  add_row(term = c("random", "unexplained"),
-          estimate = c(r2_n$R2_conditional- r2_n$R2_marginal,
-                   1 - r2_n$R2_conditional)) %>% 
-  # filter(!term == "unexplained") %>% 
-  mutate(ymax = cumsum(estimate),
-         ymin = lag(ymax, default = 0)) 
-```
-
-
-```{r fig.height=8, fig.width=7, include=FALSE}
-full_model_P <- lmer(formula(paste("log(P_biomass) ~", pred)), data = globnut)
-check_model(full_model_P)
-
-check_heteroscedasticity(full_model_P)
-check_outliers(full_model_P)
-```
-
-
-```{r eval=FALSE, include=FALSE}
-ggpredict(full_model_P, terms = "MAT [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_P, terms = "MAP [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_P, terms = "ndep [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_P, terms = "soil_age [all]") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-ggpredict(full_model_P, terms = "lith_simp") %>% 
-  plot(., show_residuals =  TRUE, show_residuals_line = TRUE)
-```
-
-
-```{r include=FALSE}
-p_limits <- c(0, 80) 
-
-(p_mat <- ggpredict(full_model_P, terms = "MAT [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("P (g/m2)",limits = p_limits) +
-  xlab("MAT (°C)") +  
-  theme_bw())
-(p_map <- ggpredict(full_model_P, terms = "MAP [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("P (g/m2)",limits = p_limits) +
-  xlab("MAP (mm/yr)") +  
-  theme_bw())
-(p_pet <- ggpredict(full_model_P, terms = "PET [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("P (g/m2)",limits = p_limits) +
-  xlab("PET (mm/yr)") +  
-  theme_bw())
-(p_age <- ggpredict(full_model_P, terms = "soil_age [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("P (g/m2)",limits = p_limits) +
-  xlab("soil age") +  
-  theme_bw())
-(p_lith <- ggpredict(full_model_P, terms = "lith_simp [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("P (g/m2)",limits = p_limits) +
-  scale_x_discrete("Soil parent material", labels = c("acid" = "acid",
-                                                      "intermediate" = "inter",
-                                                      "calcareous" = "calc",
-                                                      "mafic" = "mafic")) +
-  theme_bw())
-(p_ndep <- ggpredict(full_model_P, terms = "ndep [all]") %>% 
-  ggplot(aes(x = exp(x), y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["ndep"]) +
-    geom_line(colour = colours["ndep"], linewidth = 1) +
-  scale_y_continuous("P (g/m2)",limits = p_limits) +
-  xlab("N-deposition (g/ha)") +  
-  theme_bw())
-
-```
-
-```{r echo=FALSE, fig.height=5, fig.width=5}
-r2_p <- r2(full_model_P)
-
-res <- partR2(full_model_P, 
-              R2_type = "marginal",
-              nboot = n_boot, # set t0 1000 for final analysis
-              partbatch = batch,
-              allow_neg_r2 = TRUE)
-
-part_r2_p <- res$R2 %>% 
-  filter(term %in% c("geo","ndep","clim")) %>% 
-  dplyr::select(term, estimate, CI_lower, CI_upper) %>% 
-  add_row(term = c("random", "unexplained"),
-          estimate = c(r2_p$R2_conditional- r2_p$R2_marginal,
-                   1 - r2_p$R2_conditional)) %>% 
-  # filter(!term == "unexplained") %>% 
-  mutate(ymax = cumsum(estimate),
-         ymin = lag(ymax, default = 0)) 
-
-
-```
-
-
-```{r fig.height=8, fig.width=7, include=FALSE}
-full_model_NP <- lmer(formula(paste("log(NP) ~", pred)), data = globnut)
-check_model(full_model_NP)
-# summary(full_model_NP)
-check_heteroscedasticity(full_model_NP)
-check_outliers(full_model_NP)
-```
-
-```{r include=FALSE}
-np_limits <- c(6, 25) 
-
-(np_mat <- ggpredict(full_model_NP, terms = "MAT [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("N:P",limits = np_limits) +
-  xlab("MAT (°C)") +  
-  theme_bw())
-(np_map <- ggpredict(full_model_NP, terms = "MAP [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("N:P",limits = np_limits) +
-  xlab("MAP (mm/yr)") +  
-  theme_bw())
-(np_pet <- ggpredict(full_model_NP, terms = "PET [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["clim"]) +
-    geom_line(colour = colours["clim"], linewidth = 1) +
-  scale_y_continuous("N:P",limits = np_limits) +
-  xlab("PET (mm/yr)") +  
-  theme_bw())
-(np_age <- ggpredict(full_model_NP, terms = "soil_age [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("N:P",limits = np_limits) +
-  xlab("soil age") +  
-  theme_bw())
-(np_lith <- ggpredict(full_model_NP, terms = "lith_simp [all]") %>% 
-  ggplot(aes(x = x, y = predicted)) +
-    geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5),
-               fill = colours["geo"]) +
-  scale_y_continuous("N:P",limits = np_limits) +
-  scale_x_discrete("Soil parent material", labels = c("acid" = "acid",
-                                                      "intermediate" = "inter",
-                                                      "calcareous" = "calc",
-                                                      "mafic" = "mafic")) +
-  theme_bw())
-(np_ndep <- ggpredict(full_model_NP, terms = "ndep [all]") %>% 
-  ggplot(aes(x = exp(x), y = predicted)) +
-    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
-                 fill = colours["ndep"]) +
-    geom_line(colour = colours["ndep"], linewidth = 1) +
-  scale_y_continuous("N:P",limits = np_limits) +
-  xlab("N-deposition (g/ha)") +  
-  theme_bw())
-```
-
-```{r echo=FALSE, fig.height=5, fig.width=5}
-r2_np <- r2(full_model_NP)
-res <- partR2(full_model_NP, 
-              R2_type = "marginal",
-              nboot = n_boot, # set t0 1000 for final analysis
-              partbatch = batch,
-              allow_neg_r2 = TRUE)
-
-part_r2_np <- res$R2 %>% 
-  filter(term %in% c("geo","ndep","clim")) %>% 
-  dplyr::select(term, estimate, CI_lower, CI_upper) %>% 
-  add_row(term = c("random", "unexplained"),
-          estimate = c(r2_np$R2_conditional- r2_np$R2_marginal,
-                   1 - r2_np$R2_conditional)) %>% 
-  # filter(!term == "unexplained") %>% 
-  mutate(ymax = cumsum(estimate),
-         ymin = lag(ymax, default = 0)) 
-
-```
-
-```{r eval=FALSE, include=FALSE}
-nutr <- bind_rows(list(N = part_r2_n,
-                  P = part_r2_p,
-                  NP = part_r2_np), .id = "nutrient")
-nutr %>% 
-  filter(term %in% c("geo","ndep","clim")) %>%
-  mutate(nutrient = factor(nutrient, levels = c("N","P","NP"))) %>% 
-  ggplot(aes(x = nutrient, y = estimate, fill = term)) + 
-    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), 
-                  linewidth = 0.5, width = 0.1,
-                  position = position_dodge(0.5)) +
-    geom_point(shape = 21, size = 2, position = position_dodge(0.5)) +
-  geom_hline(yintercept = 0, linetype= "dotted") +
-  scale_y_continuous("Semi-partial R2") +
-  scale_x_discrete("") + 
-  theme_bw()
-```
-
-## Partial effect plots
-```{r echo=FALSE, fig.height=7, fig.width=7}
-biomass_mat_grid  <- biomass_mat + theme(axis.title.x = element_blank())
-biomass_map_grid  <- biomass_map + theme(axis.title = element_blank())
-biomass_pet_grid  <- biomass_pet + theme(axis.title = element_blank())
-biomass_age_grid  <- biomass_age + theme(axis.title.x = element_blank())
-biomass_lith_grid  <- biomass_lith + theme(axis.title = element_blank())
-biomass_ndep_grid  <- biomass_ndep + theme(axis.title = element_blank())
-
-n_mat_grid  <- n_mat + theme(axis.title.x = element_blank())
-n_map_grid  <- n_map + theme(axis.title = element_blank())
-n_pet_grid  <- n_pet + theme(axis.title = element_blank())
-n_age_grid  <- n_age + theme(axis.title.x = element_blank())
-n_lith_grid  <- n_lith + theme(axis.title = element_blank())
-n_ndep_grid  <- n_ndep + theme(axis.title = element_blank())
-
-p_mat_grid  <- p_mat + theme(axis.title.x = element_blank())
-p_map_grid  <- p_map + theme(axis.title = element_blank())
-p_pet_grid  <- p_pet + theme(axis.title = element_blank())
-p_age_grid  <- p_age + theme(axis.title.x = element_blank())
-p_lith_grid  <- p_lith + theme(axis.title = element_blank())
-p_ndep_grid  <- p_ndep + theme(axis.title = element_blank())
-
-np_mat_grid  <- np_mat
-np_map_grid  <- np_map + theme(axis.title.y = element_blank())
-np_pet_grid  <- np_pet + theme(axis.title.y = element_blank())
-np_age_grid  <- np_age 
-np_lith_grid  <- np_lith + theme(axis.title.y = element_blank())
-np_ndep_grid  <- np_ndep + theme(axis.title.y = element_blank())
-
-
-clim <- grid.arrange(biomass_mat_grid, biomass_map_grid, biomass_pet_grid,
-             n_mat_grid, n_map_grid, n_pet_grid,
-             p_mat_grid, p_map_grid, p_pet_grid,
-             np_mat_grid, np_map_grid, np_pet_grid)
-geo_ndep <- grid.arrange(biomass_age_grid, biomass_lith_grid, biomass_ndep_grid,
-             n_age_grid,n_lith_grid,n_ndep_grid,
-             p_age_grid,p_lith_grid,p_ndep_grid,
-             np_age_grid,np_lith_grid,np_ndep_grid)
-ggsave("figures/fig1a_lmm.png", clim,
-       width = 174, height = 247, units = "mm", dpi = 600)
-ggsave("figures/fig1b_lmm.png", geo_ndep,
-       width = 174, height = 247, units = "mm", dpi = 600)
-```
-
-## Variation explained plots
 ```{r}
-bio <- part_r2_biomass %>% 
-  ggplot(aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=term)) +
-  geom_rect(col = "black") +
-  coord_polar(theta="y") +
-  geom_text(x = 2, y = 2, label = paste("Biomass\n","Conditional R2 =\n",
-                                        round(r2_biomass$R2_conditional, 
-                                              digits = 2))) +
-  scale_fill_manual(values = colours) +
-  xlim(c(2, 4)) +
-  theme_void() +
-    theme(legend.position = "bottom",
-        legend.title = element_blank()) 
-leg <- get_legend(bio)
-bio <- bio +
-  theme(legend.position = "none")
-n <- part_r2_n %>% 
-  ggplot(aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=term)) +
-  geom_rect(col = "black") +
-  coord_polar(theta="y") +
-  geom_text(x = 2, y = 2, label = paste("N\n","Conditional R2 =\n",
-                                        round(r2_n$R2_conditional, 
-                                              digits = 2))) +
-  scale_fill_manual(values = colours) +
-  xlim(c(2, 4)) +
-  theme_void() +
-  theme(legend.position = "none")
-p <- part_r2_p %>% 
-  ggplot(aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=term)) +
-  geom_rect(col = "black") +
-  coord_polar(theta="y") +
-  geom_text(x = 2, y = 2, label = paste("P\n","Conditional R2 =\n",
-                                        round(r2_p$R2_conditional, 
-                                              digits = 2))) +
-  scale_fill_manual(values = colours) +
-  xlim(c(2, 4)) +
-  theme_void() +
-  theme(legend.position = "none")
-np <- part_r2_np %>% 
-  ggplot(aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=term)) +
-  geom_rect(col = "black") +
-  coord_polar(theta="y") +
-  geom_text(x = 2, y = 2, label = paste("N:P\n","Conditional R2 =\n",
-                                        round(r2_np$R2_conditional, 
-                                              digits = 2))) +
-  scale_fill_manual(values = colours) +
-  xlim(c(2, 4)) +
-  theme_void() +
-  theme(legend.position = "none")
+# plot terms
+biomass_limits <- c(0, 600) 
+cdl <- ggeffects::ggpredict(best_model_biomass, terms = c("ndep_cent [0.57]")) %>% 
+  mutate(x = exp(x + mean(globnut$ndep))/1000) %>% drop_na()
+vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
+horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
 
-var_plots <- grid.arrange(bio,n,p,np,leg,  ncol = 2, nrow = 3, layout_matrix = rbind(c(1,2),
-                                                                        c(3,4),
-                                                                        c(5,5)),
-             heights = c(2,2,0.5))
-ggsave("figures/fig2_varplots.png", var_plots,
-       width = 174, height = 247, units = "mm", dpi = 600)
+# nutrients
+(biomass_ndep <- ggeffects::ggpredict(best_model_biomass,
+                                 terms = c("ndep_cent [all]")) %>% 
+    ggplot(aes(x = exp(x + mean(globnut$ndep))/1000, y = predicted)) +
+      geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
+      geom_line(linewidth = 1) +
+    geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") +
+    geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+    scale_y_continuous(Biomass~(g/m^2), limits = biomass_limits) +
+    scale_x_continuous("5-year cumulative\nN-deposition (kg/ha)", trans = "log",
+                       breaks = c(5,10,25,50,100,300),
+                       labels = c(5,10,25,50,100,300)) +
+  theme_bw() +
+  theme(legend.title = element_blank()))
+
+# climate 
+(biomass_mat <- ggeffects::ggpredict(best_model_biomass, terms = "MAT_cent [all]") %>%
+  ggplot(aes(x = x + mean(globnut$MAT), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("Biomass (g/m2)",limits = biomass_limits) +
+  xlab("MAT (°C)") +
+  theme_bw())
+
+(biomass_map <- ggeffects::ggpredict(best_model_biomass, terms = "MAP_cent [all]") %>%
+  ggplot(aes(x = exp(x +mean(globnut$MAP)), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
+  xlab("MAP (mm/yr)") +
+  theme_bw())
+(biomass_pet <- ggeffects::ggpredict(best_model_biomass, terms = "PET_cent [all]") %>% 
+  ggplot(aes(x = x + mean(globnut$PET), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("biomass (g/m2)",limits = biomass_limits) +
+  xlab("PET (mm/yr)") +  
+  theme_bw())
+
+# background annotation of np plot
+lim_anno <- data.frame(xmin = c(-Inf,10,16),
+                       xmax = c(10,16,Inf),
+                       ymin = -Inf,
+                       ymax = Inf,
+                       lim = c("N-limitation", 
+                               "Co-limitation N-P","P-limitation"))
+biomass_np_pred <- ggeffects::ggpredict(best_model_biomass,
+                                 terms = c("NP_cent [all]"))
+
+(biomass_np <- ggplot() +
+  geom_rect(data = lim_anno, aes(xmin = xmin, xmax = xmax, ymin = ymin, 
+                                 ymax = ymax, fill = lim), alpha = 0.2) +
+      geom_ribbon(data = biomass_np_pred, 
+                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, ymax = conf.high), alpha = .5) +
+      geom_line(data = biomass_np_pred, aes(x = exp(x + mean(globnut$NP)), 
+                                       y = predicted), linewidth = 1) +
+    scale_x_continuous("N:P",limits = c(0,40)) +
+    scale_y_continuous(Biomass~(g/m^2), limits = biomass_limits) +
+    scale_fill_manual(values = colours_lim)+
+    theme_bw() + 
+    theme(legend.title = element_blank()))
+
+```
+
+## Species richness
+
+```{r echo=FALSE, fig.height=8, fig.width=7}
+full_model_richness <- lmer(formula(paste("log(spec_ric) ~", "log(plot_size) +", fm, "+ (1|cell)")),
+                           data = globnut,
+                           na.action = "na.fail")
+check_model(full_model_richness)
+check_collinearity(full_model_richness)
+check_outliers(full_model_biomass)
+
+# Generate all possible model combinations
+model_combinations_richness <- dredge(full_model_richness, subset = sb)
+
+# get top model
+fm_richness <- formula(get.models(model_combinations_richness, subset = 1)[[1]])
+best_model_richness <- lmer(fm_richness,
+                           data = globnut,
+                           na.action = "na.fail")
+check_model(best_model_richness)
+check_heteroscedasticity(best_model_richness)
+check_collinearity(best_model_richness)
+check_outliers(best_model_richness)
+
+model_parameters(best_model_richness) %>% plot
+```
+
+```{r}
+# plot terms
+richness_limits <- c(0, 60) 
+# species richness at critical deposition of 15 kg/ha/y (*5)
+cdl_cent <- log(75000)-mean(globnut$ndep) # log and center
+cdl <- ggeffects::ggpredict(best_model_richness, terms = c("ndep_cent [0.57]")) %>% 
+  mutate(x = exp(x + mean(globnut$ndep))/1000) %>% drop_na()
+vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
+horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
+
+# nutrients
+(richness_ndep_lim <- ggeffects::ggpredict(best_model_richness, terms = c("ndep_cent [all]")) %>% 
+  ggplot(aes(x = exp(x + mean(globnut$ndep))/1000, y = predicted)) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
+    geom_line(linewidth = 1) +
+    # geom_point(aes(x = exp(x + mean(globnut$ndep))/1000, y=1)) +
+  scale_y_continuous("Species richness (q0)", limits = richness_limits) +
+  scale_x_continuous("5-year cumulative\nN-deposition (kg/ha)", trans = "log",
+                       breaks = c(5,10,25,50,100,300),
+                       labels = c(5,10,25,50,100,300)) +
+    
+  geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+  theme_bw() +
+  theme(legend.title = element_blank()))
+(richness_plotsize <- ggeffects::ggpredict(best_model_richness, terms = "plot_size [all]") %>% 
+  ggplot(aes(x = x, y = predicted)) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["ndep"]) +
+    geom_line(colour = colours["ndep"], linewidth = 1) +
+  scale_y_continuous("Species richness",limits = richness_limits) +
+  xlab("Plot size") +
+  theme_bw())
+# Climate
+(richness_pet <- ggeffects::ggpredict(best_model_richness, terms = "PET_cent [all]") %>% 
+  ggplot(aes(x = x + mean(globnut$PET), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("Species richness",limits = richness_limits) +
+  xlab("PET (mm/yr)") +  
+  theme_bw())
+(richness_map <- ggeffects::ggpredict(best_model_richness, terms = "MAP_cent [all]") %>% 
+  ggplot(aes(x = exp(x + mean(globnut$MAP)), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("Species richness",limits = richness_limits) +
+  xlab("MAP (mm/yr)") +  
+  theme_bw())
+(richness_mat <- ggeffects::ggpredict(best_model_richness, terms = "MAT_cent [all]") %>% 
+  ggplot(aes(x = x + mean(globnut$MAT), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("Species richness",limits = richness_limits) +
+  xlab("MAT (C)") +  
+  theme_bw())
+
+richness_np_pred <- ggeffects::ggpredict(best_model_richness,
+                                 terms = c("NP_cent [all]"))
+
+(richness_np <- ggplot() +
+  geom_rect(data = lim_anno, aes(xmin = xmin, xmax = xmax, ymin = ymin, 
+                                 ymax = ymax, fill = lim), alpha = 0.2) +
+      geom_ribbon(data = richness_np_pred, 
+                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, 
+                      ymax = conf.high), alpha = .5) +
+      geom_line(data = richness_np_pred, aes(x = exp(x + mean(globnut$NP)), 
+                                       y = predicted), linewidth = 1) +
+    scale_x_continuous("N:P",limits = c(0,40)) +
+    scale_y_continuous("Species richness (q0)", limits = richness_limits) +
+    scale_fill_manual(values = colours_lim)+
+    theme_bw() + 
+    theme(legend.title = element_blank(),
+          legend.position = "none"))
+
+model_parameters(best_model_richness)
+```
+
+## Species diversity (q1)
+
+```{r echo=FALSE, fig.height=8, fig.width=7}
+full_model_q1 <- lmer(formula(paste("log(q1) ~", fm, "+ log(plot_size) + (1|cell)")), 
+                              data = globnut, 
+                           na.action = "na.fail")
+windows();check_model(full_model_q1)
+
+check_heteroscedasticity(full_model_q1)
+check_outliers(full_model_q1)
+check_collinearity(full_model_q1)
+
+# Generate all possible model combinations
+model_combinations_q1 <- dredge(full_model_q1, subset = sb)
+
+# get top model
+fm_q1 <- formula(get.models(model_combinations_q1, 
+                                 subset = 1)[[1]])
+best_model_q1 <- lmer(fm_q1, data = globnut)
+windows();check_model(best_model_q1)
+
+check_heteroscedasticity(best_model_q1)
+check_outliers(best_model_q1)
+check_collinearity(best_model_q1)
+```
+
+```{r}
+# plot terms
+q1_limits <- c(0, 15)
+cdl <- ggeffects::ggpredict(best_model_q1, terms = c("ndep_cent [0.57]")) %>% 
+  mutate(x = exp(x + mean(globnut$ndep))/1000) %>% drop_na()
+vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
+horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
+
+# nutrients
+(q1_ndep_lim <- ggeffects::ggpredict(best_model_q1,
+                                 terms = c("ndep_cent [all]")) %>% 
+    ggplot(aes(x = exp(x + mean(globnut$ndep))/1000, y = predicted)) +
+      geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
+      geom_line(linewidth = 1) +
+    scale_color_manual(values = colours_lim) +
+    scale_fill_manual(values = colours_lim) +
+     geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+    scale_y_continuous("ENS (q1)", limits = q1_limits) +
+    scale_x_continuous("5-year cumulative\nN-deposition (kg/ha)", trans = "log",
+                       breaks = c(5,10,25,50,100,300),
+                       labels = c(5,10,25,50,100,300)) +
+  theme_bw() +
+  theme(legend.title = element_blank()))
+# climate 
+(q1_mat <- ggeffects::ggpredict(best_model_q1, terms = "MAT_cent [all]") %>%
+  ggplot(aes(x = x + mean(globnut$MAT), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("ENS (q1)",limits = q1_limits) +
+  xlab("MAT (°C)") +
+  theme_bw())
+(q1_pet <- ggeffects::ggpredict(best_model_q1, terms = "MAT_cent [all]") %>%
+  ggplot(aes(x = x + mean(globnut$MAT), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("ENS (q1)",limits = q1_limits) +
+  xlab("PET (mm/yr)") +
+  theme_bw())
+(q1_map <- ggeffects::ggpredict(best_model_q1, terms = "MAP_cent [all]") %>% 
+  ggplot(aes(x = exp(x + mean(globnut$MAP)), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("ENS (q1)",limits = q1_limits) +
+  xlab("MAP (mm/yr)") +  
+  theme_bw())
+
+q1_np_pred <- ggeffects::ggpredict(best_model_q1,
+                                 terms = c("NP_cent [all]"))
+
+(q1_np <- ggplot() +
+  geom_rect(data = lim_anno, aes(xmin = xmin, xmax = xmax, ymin = ymin, 
+                                 ymax = ymax, fill = lim), alpha = 0.2) +
+      geom_ribbon(data = q1_np_pred, 
+                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, 
+                      ymax = conf.high), alpha = .5) +
+      geom_line(data = q1_np_pred, aes(x = exp(x + mean(globnut$NP)), 
+                                       y = predicted), linewidth = 1) +
+    scale_x_continuous("N:P",limits = c(0,40)) +
+    scale_y_continuous("ENS (q1)", limits = q1_limits) +
+    scale_fill_manual(values = colours_lim)+
+    theme_bw() + 
+    theme(legend.title = element_blank(),
+          legend.position = "none"))
+
+model_parameters(best_model_q1) 
+```
+
+## Species diversity (q2)
+
+```{r echo=FALSE, fig.height=8, fig.width=7}
+full_model_q2 <- lmer(formula(paste("log(q2) ~", fm, " + log(plot_size) + (1|cell)")), 
+                      data = globnut, 
+                           na.action = "na.fail")
+windows();check_model(full_model_q2)
+
+check_heteroscedasticity(full_model_q2)
+check_outliers(full_model_q2)
+check_collinearity(full_model_q2)
+
+# Generate all possible model combinations
+model_combinations_q2 <- dredge(full_model_q2, subset = sb)
+
+# get top model
+fm_q2 <- formula(get.models(model_combinations_q2, 
+                                 subset = 1)[[1]])
+best_model_q2 <- lmer(fm_q2, data = globnut)
+
+windows();check_model(best_model_q2)
+check_heteroscedasticity(best_model_q2)
+check_outliers(best_model_q2)
+check_collinearity(best_model_q2)
+```
+
+```{r}
+# plot terms
+q2_limits <- c(0, 8) 
+cdl <- ggeffects::ggpredict(best_model_q2, terms = c("ndep_cent [0.57]")) %>% 
+  mutate(x = exp(x + mean(globnut$ndep))/1000) %>% drop_na()
+vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
+horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
+
+# nutrients
+(q2_ndep_lim <- ggeffects::ggpredict(best_model_q2,
+                                 terms = c("ndep_cent [all]")) %>% 
+    ggplot(aes(x = exp(x + mean(globnut$ndep))/1000, y = predicted)) +
+      geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
+      geom_line(linewidth = 1) +
+     geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+    scale_y_continuous("ENS (q2)", limits = q2_limits) +
+    scale_x_continuous("5-year cumulative\nN-deposition (kg/ha)", trans = "log",
+                       breaks = c(5,10,25,50,100,300),
+                       labels = c(5,10,25,50,100,300)) +
+  theme_bw() +
+  theme(legend.title = element_blank()))
+
+# climate 
+(q2_mat <- ggeffects::ggpredict(best_model_q2, terms = "MAT_cent [all]") %>%
+  ggplot(aes(x = x + mean(globnut$MAT), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("ENS (q2)",limits = q2_limits) +
+  xlab("MAT (°C)") +
+  theme_bw())
+(q2_map <- ggeffects::ggpredict(best_model_q2, terms = "MAP_cent [all]") %>% 
+  ggplot(aes(x = exp(x + mean(globnut$MAP)), y = predicted)) +
+    geom_ribbon( aes(ymin = conf.low, ymax = conf.high), alpha = .5,
+                 fill = colours["clim"]) +
+    geom_line(colour = colours["clim"], linewidth = 1) +
+  scale_y_continuous("ENS (q2)",limits = q2_limits) +
+  xlab("MAP (mm/yr)") +  
+  theme_bw())
+
+q2_np_pred <- ggeffects::ggpredict(best_model_q2,
+                                 terms = c("NP_cent [all]"))
+
+(q2_np <- ggplot() +
+  geom_rect(data = lim_anno, aes(xmin = xmin, xmax = xmax, ymin = ymin, 
+                                 ymax = ymax, fill = lim), alpha = 0.2) +
+      geom_ribbon(data = q2_np_pred, 
+                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, 
+                      ymax = conf.high), alpha = .5) +
+      geom_line(data = q2_np_pred, aes(x = exp(x + mean(globnut$NP)), 
+                                       y = predicted), linewidth = 1) +
+    scale_x_continuous("N:P",limits = c(0,40)) +
+    scale_y_continuous("ENS (q2)", limits = q2_limits) +
+    scale_fill_manual(values = colours_lim) +
+    theme_bw() + 
+    theme(legend.title = element_blank(),
+          legend.position = "none"))
+
+
+model_parameters(best_model_q2)
+```
+
+## Plots
+
+```{r echo=FALSE, include=TRUE, fig.width = 8, fig.height = 4, dpi = 300}
+leg <- get_legend(biomass_np + theme(legend.position = "bottom"))
+ndep_lim1 <- biomass_ndep + theme(legend.position = "none")
+ndep_lim2 <- richness_ndep_lim + theme(legend.position = "none") 
+ndep_lim3 <- q1_ndep_lim + theme(legend.position = "none")
+ndep_lim4 <- q2_ndep_lim + theme(legend.position = "none")
+np_lim1 <- biomass_np + theme(legend.position = "none")
+np_lim2 <- richness_np + theme(legend.position = "none") 
+np_lim3 <- q1_np + theme(legend.position = "none")
+np_lim4 <- q2_np + theme(legend.position = "none")
+
+# g <- grid.arrange(ndep_lim1, ndep_lim2, ndep_lim3, ndep_lim4, leg,
+#              layout_matrix = rbind(c(1,2),
+#                                  c(3,4),
+#                                  c(5,5)), heights = c(3,3.1,1))
+
+g <- grid.arrange(ndep_lim1, ndep_lim2, ndep_lim3, ndep_lim4, 
+                  np_lim1, np_lim2, np_lim3, np_lim4, leg,
+             layout_matrix = rbind(c(1,2,3,4),
+                                 c(5,6,7,8),
+                                  c(NA,9,9,NA)), heights = c(3,3,0.5))
+
+
+ggsave("figures/fig2_ndep_lim.png", g, height = 4.5, width = 8, dpi = 300)
+
+```
+
+# Supplementary
+
+## Model parameters
+
+```{r echo=FALSE, include=TRUE}
+model_parameters(best_model_biomass) %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+   filter(!str_detect(Parameter, "SD")) %>% 
+  mutate(Parameter = str_remove(Parameter, "lith_simp|lim|_cent") %>% 
+           str_remove("I\\(") %>% str_remove( "\\)"),
+         Parameter = case_when(Parameter == "ndep" ~ "N-deposition (log)",
+                               Parameter == "ndep^2" ~ "N-deposition^2 (log)",
+                               Parameter == "MAP" ~ "MAP (log)",
+                               TRUE ~ Parameter),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(-CI, -CI_low, -CI_high, -df_error, -t, -Group, -Effects) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          Coefficient = c(round(r2(best_model_biomass)$R2_conditional, 3),
+                          round(r2(best_model_biomass)$R2_marginal,3))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Model output biomass")
+
+model_parameters(best_model_richness) %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  filter(!str_detect(Parameter, "SD")) %>% 
+  mutate(Parameter = str_remove(Parameter, "lith_simp|lim|_cent") %>% 
+           str_remove("I\\(") %>% str_remove( "\\)"),
+         Parameter = case_when(Parameter == "ndep" ~ "N-deposition (log)",
+                               Parameter == "ndep^2" ~ "N-deposition^2 (log)",
+                               Parameter == "log(plot_size" ~ "plot_size (log)",
+                               Parameter == "MAP" ~ "MAP (log)",
+                               TRUE ~ Parameter),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(-CI, -CI_low, -CI_high, -df_error, -t, -Group, -Effects) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          Coefficient = c(round(r2(best_model_richness)$R2_conditional, 3),
+                          round(r2(best_model_richness)$R2_marginal,3))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Model output Species richness")
+  
+
+model_parameters(best_model_q1) %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  filter(!str_detect(Parameter, "SD")) %>% 
+  mutate(Parameter = str_remove(Parameter, "lith_simp|lim|_cent") %>% 
+           str_remove("I\\(") %>% str_remove( "\\)"),
+         Parameter = case_when(Parameter == "ndep" ~ "N-deposition (log)",
+                               Parameter == "ndep^2" ~ "N-deposition^2 (log)",
+                               Parameter == "log(plot_size" ~ "plot_size (log)",
+                               Parameter == "MAP" ~ "MAP (log)",
+                               TRUE ~ Parameter),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(-CI, -CI_low, -CI_high, -df_error, -t, -Group, -Effects) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          Coefficient = c(round(r2(best_model_q1)$R2_conditional, 3),
+                          round(r2(best_model_q1)$R2_marginal,3))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Model output q1")
+
+model_parameters(best_model_q2) %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  filter(!str_detect(Parameter, "SD")) %>% 
+  mutate(Parameter = str_remove(Parameter, "lith_simp|lim|_cent") %>% 
+           str_remove("I\\(") %>% str_remove( "\\)"),
+         Parameter = case_when(Parameter == "ndep" ~ "N-deposition (log)",
+                               Parameter == "ndep^2" ~ "N-deposition^2 (log)",
+                               Parameter == "log(plot_size" ~ "plot_size (log)",
+                               Parameter == "MAP" ~ "MAP (log)",
+                               TRUE ~ Parameter),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(-CI, -CI_low, -CI_high, -df_error, -t, -Group, -Effects) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          Coefficient = c(round(r2(best_model_q2)$R2_conditional, 3),
+                          round(r2(best_model_q2)$R2_marginal,3))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Model output q2")
+
 ```
 
 
-## Model outputs
+## Model selection
+
 ```{r echo=FALSE}
-model_parameters(full_model_biomass) %>% 
-  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
-  mutate(Parameter = str_remove(Parameter, "lith_simp")) %>% 
-  as_tibble() %>% 
-  dplyr::select(-t,-df_error,-Group,-CI) %>% 
-  kable(caption = "Model output biomass")
-kable(r2_biomass)
+## biomass
+# Create a table with the model formula, AIC, and delta AIC
+model_table <- cbind(Formula = get.models(model_combinations, subset = TRUE) %>% 
+                       map(., ~formula(., fixed.only = TRUE)),
+                      AIC = round(model_combinations$AICc, 2),
+                      Delta_AIC = round(model_combinations$delta, 2)) %>% 
+  as.data.frame(row.names = NULL) 
 
-model_parameters(full_model_N) %>% 
-  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
-  mutate(Parameter = str_remove(Parameter, "lith_simp")) %>% 
-  as_tibble() %>% 
-  dplyr::select(-t,-df_error,-Group,-CI) %>% 
-  kable(caption = "Model output nitrogen")
-kable(r2_n)
+# Create a table in R Markdown format
+kable(model_table, row.names = FALSE)
 
-model_parameters(full_model_P) %>% 
-  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
-  mutate(Parameter = str_remove(Parameter, "lith_simp")) %>% 
-  as_tibble() %>% 
-  dplyr::select(-t,-df_error,-Group, -CI) %>% 
-  kable(caption = "Model output phosphorus")
-kable(r2_p)
+compare_performance(get.models(model_combinations, subset = 1:10)) %>% kable
 
-model_parameters(full_model_NP) %>%
-  mutate(across(where(is.numeric), ~round(., digits = 4))) %>%
-  mutate(Parameter = str_remove(Parameter, "lith_simp")) %>%
-  as_tibble() %>%
-  dplyr::select(-t,-df_error,-Group,-CI) %>%
-  kable(caption = "Model output N:P")
-kable(r2_np)
+
+## Richness
+# Create a table with the model formula, AIC, and delta AIC
+model_table_richness <- cbind(Formula = get.models(model_combinations_richness, subset = TRUE) %>% 
+                       map(., ~formula(., fixed.only = TRUE)),
+                      AIC = round(model_combinations_richness$AICc, 2),
+                      Delta_AIC = round(model_combinations_richness$delta, 2)) %>% 
+  as.data.frame(row.names = NULL)
+
+# Create a table in R Markdown format
+kable(model_table_richness, row.names = FALSE)
+
+compare_performance(get.models(model_combinations_richness, subset = 1:10)) 
+
+
+## q1
+# Create a table with the model formula, AIC, and delta AIC
+model_table_q1 <- cbind(Formula = get.models(model_combinations_q1, subset = TRUE) %>% 
+                       map(., ~formula(., fixed.only = TRUE)),
+                      AIC = round(model_combinations_q1$AICc, 2),
+                      Delta_AIC = round(model_combinations_q1$delta, 2)) %>% 
+  as.data.frame(row.names = NULL) 
+
+
+# Create a table in R Markdown format
+kable(model_tableq1, row.names = FALSE)
+
+compare_performance(get.models(model_combinations_q1, subset = 1:10)) 
+
+
+## q2
+# Create a table with the model formula, AIC, and delta AIC
+model_table_q2 <- cbind(Formula = get.models(model_combinations_q2, subset = TRUE) %>% 
+                       map(., ~formula(., fixed.only = TRUE)),
+                      AIC = round(model_combinations_q2$AICc, 2),
+                      Delta_AIC = round(model_combinations_q2$delta, 2)) %>% 
+  as.data.frame(row.names = NULL) 
+
+# Create a table in R Markdown format
+kable(model_tableq2, row.names = FALSE)
+
+compare_performance(get.models(model_combinations_q2, subset = 1:10)) 
 ```

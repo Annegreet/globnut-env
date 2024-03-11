@@ -1,0 +1,740 @@
+---
+title: "N-dep effect on beta diversity"
+author: "Annegreet Veeken"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+--- 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.height = 7,
+	fig.width = 7,
+	message = FALSE,
+	warning = FALSE,
+	include = TRUE
+)
+# References:
+# - Borcard (2018). Numerical Ecology in R
+
+## Load packages
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(knitr)) install.packages("knitr")
+if(!require(vegan)) install.packages("vegan")
+if(!require(geosphere)) install.packages("geosphere")
+if(!require(terra)) install.packages("terra")
+if(!require(easystats)) install.packages("easystats")
+if(!require(sf)) install.packages("sf")
+if(!require(rnaturalearth)) install.packages("rnaturalearth")
+if(!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
+if(!require(betareg)) install.packages("betareg")
+if(!require(patchwork)) install.packages("patchwork")
+```
+
+```{r load data}
+## Load data ----
+dir <- "C:/Users/3768651/OneDrive - Universiteit Utrecht/Globnut_offline/_GLOBNUT1.0/"
+globnut <- readRDS("outputs/02_GlobNut.rds") %>% 
+  ungroup() %>% 
+  filter(!lim == "No limitation by N, P, K") %>% 
+  dplyr::filter(between(lat, 35, 75)) %>% 
+  dplyr::filter(between(lon, -25, 150)) %>% 
+  drop_na %>% 
+  mutate(ndep = log(ndep*10), # to g/ha en log
+         MAP = log(MAP),
+         NP = log(NP)) %>%
+  dplyr::select(plot_ID, lon,lat,sample_year, ndep, MAP, MAT, PET, NP) %>% 
+  drop_na() 
+# Use EMEP raster for aggregating plots
+emep <- rast("Z:/geo_data/EMEP/EUN_Annegreet_tif_shp_20240208.11.4.58/20240208_Annegreet_EUN_Total_nitrogen_deposition_PRIMES_2018_CLE_EUCO3232p5_BLv2_2050.tif")
+
+# master raster
+masras <- rast(ext(-25,150,35,75), resolution=res(emep)) 
+values(masras) <- 1:ncell(masras)
+
+# Get the corresponding grid cells for each plot
+globnut$cell <- terra::extract(x = masras, y = as.matrix(globnut[,c("lon","lat")]))$lyr.1
+globnut$cell_lon <- xFromCell(masras, globnut$cell) 
+globnut$cell_lat <- yFromCell(masras, globnut$cell) 
+
+# species data
+spec_raw <- read.csv(paste0(dir, "GlobNut1.0_species.csv"))
+```
+
+```{r regions}
+## Plot grid
+sf::sf_use_s2(FALSE)
+europe <- ne_countries(scale = "medium", 
+                       # country = country,
+                       returnclass = "sf") %>% 
+  # fix geometry of russia (sf_use_s2() must be FALSE for this)
+  st_make_valid() %>% 
+  st_crop(., c(xmin = -25, ymin = 35, xmax = 150, ymax = 72)) 
+regions <- data.frame(region = c("west_eu", "central_eu", "south_eu", "north_eu", 
+                                 "sib", "alps", "east_eu", "jak", "kaz"),
+                            xmin = c(2, 11, -11, 15, 85, 9, 20, 126, 65),
+                            ymin = c(49, 48, 35, 52, 48, 45, 45, 60, 48),
+                            xmax = c(9, 20, 0, 29, 92, 14, 29, 133, 80),
+                            ymax = c(55, 52, 43, 59, 54, 48, 48, 64, 56))
+globnut <- globnut %>% 
+  mutate(region = case_when(between(cell_lon, regions$xmin[1],regions$xmax[1]) &  
+                             between(cell_lat, regions$ymin[1],regions$ymax[1]) ~ regions$region[1],
+                            between(cell_lon, regions$xmin[2],regions$xmax[2]) &  
+                              between(cell_lat, regions$ymin[2],regions$ymax[2]) ~ regions$region[2],
+                            between(cell_lon, regions$xmin[3],regions$xmax[3]) &  
+                              between(cell_lat, regions$ymin[3],regions$ymax[3]) ~ regions$region[3],
+                            between(cell_lon, regions$xmin[4],regions$xmax[4]) &  
+                              between(cell_lat, regions$ymin[4],regions$ymax[4]) ~ regions$region[4],
+                            between(cell_lon, regions$xmin[5],regions$xmax[5]) &  
+                              between(cell_lat, regions$ymin[5],regions$ymax[5]) ~ regions$region[5],
+                            between(cell_lon, regions$xmin[6],regions$xmax[6]) &  
+                              between(cell_lat, regions$ymin[6],regions$ymax[6]) ~ regions$region[6],
+                            between(cell_lon, regions$xmin[7],regions$xmax[7]) &  
+                              between(cell_lat, regions$ymin[7],regions$ymax[7]) ~ regions$region[7],
+                            between(cell_lon, regions$xmin[8],regions$xmax[8]) &  
+                              between(cell_lat, regions$ymin[8],regions$ymax[8]) ~ regions$region[8],
+                            between(cell_lon, regions$xmin[9],regions$xmax[9]) &  
+                              between(cell_lat, regions$ymin[9],regions$ymax[9]) ~ regions$region[9]))
+
+# check amount of cells with enough plots per region
+plotcounts  <- globnut %>% 
+  # filter(sample_year >= 2010) %>% 
+  group_by(region, cell,cell_lon,cell_lat) %>% 
+  summarise(count = n()) %>% 
+  filter(count >= 5) 
+
+ggplot() +
+  geom_sf(data = europe, fill = NA, col = "black")  +
+  geom_point(data = plotcounts, aes(x = cell_lon, y = cell_lat, color = region), size = 1, alpha = 0.5) +
+  geom_rect(data = regions , aes(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax), fill = NA,colour = "black") +
+  scale_fill_gradient(low="blue", high="red") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+```{r plot selection}
+## Select plots for analysis ----
+set.seed(1234)
+# randomly select 5 samples per cell
+plot_ids <- globnut %>%
+  group_by(cell) %>% 
+  mutate(n = n()) %>% 
+  filter(n >= 5) %>% 
+  sample_n(size = 5, weight = freq_year) %>% 
+  dplyr::select(region, cell, plot_ID) %>% 
+  filter(!is.na(region)) %>% 
+  distinct()
+
+cellcounts  <- globnut %>% 
+  filter(plot_ID %in% plot_ids$plot_ID) %>% 
+  group_by(region) %>% 
+    summarise(count = n_distinct(cell)) 
+
+## Prepare data ----
+spec <- spec_raw %>% 
+  ungroup() %>% 
+  # only vascular plants
+  dplyr::filter(vascular_plant == 1) %>% 
+  # convert subspecies to species
+  mutate(species_new = str_remove(species_new, pattern = " subsp.*| var\\.")) %>%
+  group_by(plot_ID, species_new) %>% # aggregate by species
+  summarise(cover = sum(cover, na.rm = TRUE)) %>% 
+  dplyr::filter(cover != 0)  %>% 
+  #  to 100 %
+  group_by(plot_ID) %>% 
+  mutate(covertot = sum(cover), cover = round(cover/covertot*100)) %>% 
+  # Average abundance per cell
+  left_join(globnut[,c("cell", "plot_ID")], by = "plot_ID") %>% 
+  filter(plot_ID %in% plot_ids$plot_ID) %>%  # select for sampled plots
+  group_by(cell, species_new) %>% 
+  summarise(cover = mean(cover)) 
+
+spec_wide <- spec  %>% 
+   dplyr::select(cell, species_new, cover) %>% 
+  # convert to wide to calculate diversity measures
+  pivot_wider(names_from = species_new, values_from = cover, values_fill = 0) 
+
+# Prepare environmental data
+env_data <- globnut %>% 
+  # filter for selected plots
+  filter(plot_ID %in% plot_ids$plot_ID) %>% 
+  # get average per cell
+  group_by(cell) %>% 
+  summarise(across(ndep:NP, mean)) %>% 
+  left_join(plotcounts, by = "cell")
+```
+
+
+```{r dissimilarity}
+## Dissimilarity calculations ---- 
+# calculate bray curtis dissimilarity 
+cell_names <- plot_ids %>% 
+  ungroup %>% 
+  dplyr::select(-plot_ID) %>% 
+  distinct() %>% 
+  mutate(member = 1:nrow(.))
+
+diss_spec <-   
+  # calculate dissimilarity as Bray-curtis (aka percentage difference)
+  vegdist(decostand(spec_wide[,-1], method = "total"), method = "bray") %>% 
+  # convert to dataframe, to long format and add plot pair to facilitate merge with environmental dat
+  as.matrix(.) %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(cols = !member1, names_to = "member2", values_to = "beta") %>% 
+  mutate(member2 = as.numeric(member2)) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1)  %>% 
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) 
+
+# Calculate geographical distance plot pairs
+coordinates <- env_data[,c("cell_lon","cell_lat")]
+dist_geo <- distm(coordinates, fun=distGeo) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "distance") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2"))  %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+
+# Calculate dissimilarity (euclidean) in environmental variables for plot pairs 
+NP_diss <- dist(scale(env_data$NP)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_NP") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+ndep_diss <- dist(scale(env_data$ndep)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_ndep") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+MAT_diss <- dist(scale(env_data$MAT)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_MAT") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+MAP_diss <- dist(scale(env_data$MAP)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_MAP") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+PET_diss <- dist(scale(env_data$PET)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_PET") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+
+# calculate mean between pairs for other environmental variables
+NP_mean <- outer(env_data$NP, env_data$NP, FUN = "+") %>% # add plot pairs
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "mean_np") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric(),
+         mean_np = mean_np/2) %>% # get mean
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+ndep_mean <- outer(env_data$ndep, env_data$ndep, FUN = "+") %>% # add plot pairs
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "mean_ndep") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric(),
+         mean_ndep = mean_ndep/2) %>% # get mean
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+```
+
+```{r beta regressions, include=FALSE}
+
+## Beta regressions ----
+
+# beta regression can't assume 1 - transformation is needed
+# first check percentage of 1's
+# https://cran.r-project.org/web/packages/betareg/vignettes/betareg.pdf p.3 
+diss_spec %>% 
+  group_by(region1) %>% 
+  summarise(is_one = sum(beta == 1)/n())
+
+reg_data_beta <- diss_spec %>% 
+  # join with predictors
+  left_join(NP_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(ndep_mean, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(dist_geo, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(MAT_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(MAP_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(PET_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(ndep_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  dplyr::select(member1, member2, cell1, cell2, region = region1, -region2, everything()) %>% 
+  group_by(region) %>% 
+  mutate(beta = (beta * (n() - 1) + 0.5)/n())
+  
+# west eu
+par(mfrow = c(2,2))
+west_eu <- betareg(beta ~ distance + 
+               mean_ndep + 
+               diss_ndep +
+               diss_NP  + 
+               diss_MAT + 
+               diss_MAP + 
+               diss_PET, 
+             data=reg_data_beta[reg_data_beta$region=="west_eu",])
+summary(west_eu)
+
+plot(west_eu, which = 1:4, type = "pearson", ask=FALSE)
+plot(west_eu, which = 5, type = "deviance", sub.caption = "")
+
+# central europe
+central_eu <- betareg(beta ~ distance + 
+                     mean_ndep + 
+                     diss_ndep +
+                     diss_NP  + 
+                     diss_MAT + 
+                     diss_MAP + 
+                     diss_PET, 
+                   data=reg_data_beta[reg_data_beta$region=="central_eu",])
+summary(central_eu)
+plot(central_eu, which = 1:4, type = "pearson", ask=FALSE, main = "central_eu")
+plot(central_eu, which = 5, type = "deviance", sub.caption = "")
+
+# north europe
+north_eu <- betareg(beta ~ distance + 
+                        mean_ndep + 
+                        diss_ndep +
+                        diss_NP  + 
+                        diss_MAT + 
+                        diss_MAP + 
+                        diss_PET, 
+                      data=reg_data_beta[reg_data_beta$region=="north_eu",])
+summary(north_eu)
+plot(north_eu, which = 1:4, type = "pearson", ask=FALSE, main = "north_eu")
+# plot(north_eu, which = 5, type = "deviance", sub.caption = "")
+
+# east eu
+east_eu <- betareg(beta ~ distance + 
+                      mean_ndep + 
+                      diss_ndep +
+                      diss_NP  + 
+                      diss_MAT + 
+                      diss_MAP + 
+                      diss_PET, 
+                    data=reg_data_beta[reg_data_beta$region=="east_eu",])
+summary(east_eu)
+plot(east_eu, which = 1:4, type = "pearson", ask=FALSE, main = "east_eu")
+plot(east_eu, which = 5, type = "deviance", sub.caption = "")
+
+# Siberia
+sib <- betareg(beta ~ distance + 
+                     mean_ndep + 
+                     diss_ndep +
+                     diss_NP  + 
+                     diss_MAT + 
+                     diss_MAP + 
+                     diss_PET, 
+                   data=reg_data_beta[reg_data_beta$region=="sib",])
+summary(sib)
+plot(sib, which = 1:4, type = "pearson", ask=FALSE, main = "sib")
+plot(sib, which = 5, type = "deviance", sub.caption = "")
+
+# Kazachstan
+kaz <- betareg(beta ~ distance + 
+                     mean_ndep + 
+                     diss_ndep +
+                     diss_NP  + 
+                     diss_MAT + 
+                     diss_MAP + 
+                     diss_PET, 
+                   data=reg_data_beta[reg_data_beta$region=="kaz",])
+summary(kaz)
+plot(kaz, which = 1:4, type = "pearson", ask=FALSE, main = "kaz")
+plot(kaz, which = 5, type = "deviance", sub.caption = "")
+
+# Jakutsk
+jak <- betareg(beta ~ distance + 
+                     mean_ndep + 
+                     diss_ndep +
+                     diss_NP  + 
+                     diss_MAT + 
+                     diss_MAP + 
+                     diss_PET, 
+                   data=reg_data_beta[reg_data_beta$region=="jak",])
+summary(jak)
+plot(jak, which = 1:4, type = "pearson", ask=FALSE, main = "jak")
+plot(jak, which = 5, type = "deviance", sub.caption = "")
+
+# Alps
+alp <- betareg(beta ~ distance + 
+                     mean_ndep + 
+                     diss_ndep +
+                     diss_NP  + 
+                     diss_MAT + 
+                     diss_MAP + 
+                     diss_PET, 
+                   data=reg_data_beta[reg_data_beta$region=="alps",])
+summary(alp)
+plot(alp, which = 1:4, type = "pearson", ask=FALSE, main = "alp")
+plot(alp, which = 5, type = "deviance", sub.caption = "")
+```
+
+```{r visualizations, echo=FALSE, fig.height=5,fig.width=9}
+## Visualizations ----
+pred_beta <- rbind(ggeffects::ggpredict(west_eu) %>%  do.call(bind_rows,.) %>% as.data.frame() %>% 
+                     mutate(region = "west_eu"),
+                   ggeffects::ggpredict(central_eu) %>%  do.call(bind_rows,.) %>% as.data.frame() %>% 
+                     mutate(region = "central_eu"),
+      ggeffects::ggpredict(north_eu) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  
+        mutate(region = "north_eu"),
+      ggeffects::ggpredict(east_eu) %>%  do.call(bind_rows,.) %>% as.data.frame() %>% 
+        mutate(region = "east_eu"),
+      ggeffects::ggpredict(sib) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "sib"),
+       ggeffects::ggpredict(jak) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "jak"),
+      ggeffects::ggpredict(kaz) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "kaz"),
+      ggeffects::ggpredict(alp) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "alps"))
+
+coef_beta <- rbind(standardise_parameters(north_eu) %>% as.data.frame() %>% mutate(region = "north_eu"),
+      standardise_parameters(central_eu) %>% as.data.frame() %>% mutate(region = "central_eu"),
+      standardise_parameters(west_eu) %>% as.data.frame()  %>% mutate(region = "west_eu"),
+      standardise_parameters(east_eu) %>% as.data.frame()  %>% mutate(region = "east_eu"),
+      standardise_parameters(sib) %>% as.data.frame()  %>% mutate(region = "sib"),
+      standardise_parameters(jak) %>% as.data.frame()  %>% mutate(region = "jak"),
+      standardise_parameters(kaz) %>% as.data.frame()  %>% mutate(region = "kaz"),
+      standardise_parameters(alp) %>% as.data.frame()  %>% mutate(region = "alps")) 
+
+region_label <- c(jak = paste0("Yakutsk (N = ", cellcounts$count[cellcounts$region == "jak"],")"), 
+                  north_eu = paste0("Northeast Europe (N = ", 
+                                    cellcounts$count[cellcounts$region == "north_eu"],")"),
+                  kaz = paste0("Kazachstan  (N = ", cellcounts$count[cellcounts$region == "kaz"],")"),
+                  west_eu = paste0("West Europe (N = ", 
+                                   cellcounts$count[cellcounts$region == "west_eu"],")"),
+                  sib = paste0("Siberia (N = ", cellcounts$count[cellcounts$region == "sib"],")"),
+                  central_eu = paste0("Central Europe (N = ", 
+                                      cellcounts$count[cellcounts$region == "central_eu"],")"),
+                  east_eu = paste0("East Europe (N = ", 
+                                   cellcounts$count[cellcounts$region == "east_eu"],")"),
+                  alps = paste0("Alps (N = ", cellcounts$count[cellcounts$region == "alps"],")"),
+                  south_eu = paste0("Iberian peninsula (N = ", 
+                                    cellcounts$count[cellcounts$region == "south_eu"],")"))
+
+
+region_color <- c(jak = '#a65628',
+                  north_eu = '#377eb8',
+                  kaz = '#4daf4a',
+                  west_eu = '#984ea3',
+                  sib = '#e41a1c',
+                  central_eu = '#ff7f00',
+                  east_eu = '#ffff33',
+                  alps = '#f781bf',
+                  south_eu = '#999999')
+var_labels <- c(diss_NP = "Distance N:P",
+                mean_ndep = "Mean N-deposition",
+                distance = "Geographical distance",
+                diss_MAT =  "Distance MAP",
+                diss_MAP = "Distance MAT",
+                diss_PET = "Distance PET",
+                diss_ndep = "Distance N-deposition")
+
+# line graphs per environmental variable
+p1 <- pred_beta %>%
+  filter(group == "mean_ndep") %>% 
+  ggplot(aes(x = exp(x)/1000, y = predicted, color = region, fill = region)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.3, color = NA) +
+  geom_line() +
+  scale_x_continuous("Mean 5-year cumulative\nN-deposition (kg/ha)", trans = "log",
+                     breaks = c(5,10,25,50,100,300),
+                     labels = c(5,10,25,50,100,300)) +
+  scale_y_continuous("β-diversity", limits = c(0.7,1)) +
+  scale_fill_manual(values = region_color, labels = region_label) +
+  scale_color_manual(values = region_color, labels = region_label) +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+p2 <- pred_beta %>%
+  filter(group == "diss_NP") %>% 
+  ggplot(aes(x = x, y = predicted, color = region, fill = region)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.3, color = NA) +
+  geom_line() +
+  scale_x_continuous("Distance in N:P\n  ") +
+  scale_y_continuous("", limits = c(0.7,1)) +
+  scale_fill_manual(values = region_color, labels = region_label) +
+  scale_color_manual(values = region_color, labels = region_label) +
+  theme_bw() +
+  theme( #legend.position =  "bottom",
+        legend.title = element_blank())
+p3 <- p1 + p2 + patchwork::plot_layout(guides = "collect", nrow = 2, 
+                                                heights = c(5, 1), widths = c(8,8)) 
+ggsave("figures/Beta_np_ndep.png", p3, dpi = 300, height = 4, width = 9)
+
+p3
+
+# dot plots
+p <- coef_beta %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  # filter(Parameter %in% c("mean_ndep", "diss_NP", "diss_ndep")) %>% 
+  ggplot(aes(x = Std_Coefficient, y = Parameter, fill = region)) +
+  geom_vline(xintercept = 0, linetype = "dotted") +
+  geom_point(position = position_dodge(0.5),shape =21) +
+  geom_errorbar(aes(xmin = CI_low, xmax = CI_high), position = position_dodge(0.5)) +
+  scale_x_continuous("Standardized coefficient") +
+  scale_y_discrete("",labels = var_labels) +
+  scale_fill_manual(values = region_color) +
+  facet_wrap(~region, nrow = 2,labeller = as_labeller(region_label)) +
+  theme_bw() +
+  theme(legend.position = "none")
+p
+
+ggsave("figures/Supp-beta-coef-plots.png",p, dpi = 300, height = 5, width = 9)
+
+var_labels2 <- c(MAT = "MAT (C)",
+                 PET ="PET (mm/yr)",
+                 MAP = "MAP (mm/yr)(log)",
+                 ndep = "N-deposition (kg/ha)(log)",
+                 NP = "N:P (log)")
+# environmental variable - boxplot by region
+g <- env_data %>% 
+  dplyr::select(-cell_lat,-cell_lon,-count) %>% 
+  pivot_longer(cols = ndep:NP, names_to = "var", values_to = "value") %>% 
+  ggplot(aes(x = region, y = value, fill = region)) +
+  geom_boxplot() +
+  facet_wrap(~var, scales = "free_y", labeller = as_labeller(var_labels2)) +
+  scale_fill_manual(values = region_color, labels = region_label) +
+  scale_x_discrete("", labels = region_label) +
+  scale_y_continuous("") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.position = "none")
+g
+ggsave("figures/Sup_env_var_region.png",g, dpi = 300, height = 5, width = 7)
+```
+
+```{r model outputs}
+model_parameters(west_eu)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(west_eu)$R2, 3), nobs(west_eu))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "West Europe")
+
+model_parameters(east_eu)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(east_eu)$R2, 3), nobs(east_eu))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "East Europe")
+
+model_parameters(central_eu)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(central_eu)$R2, 3), nobs(central_eu))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Central Europe")
+
+model_parameters(north_eu)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(north_eu)$R2, 3), nobs(north_eu))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Northeastern Europe")
+
+model_parameters(jak)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(jak)$R2, 3), nobs(jak))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Yakutsk")
+
+model_parameters(kaz)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(kaz)$R2, 3), nobs(kaz))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Kazachstan")
+
+model_parameters(sib)  %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  filter(!Parameter == "(Intercept)") %>% 
+  mutate(Parameter = case_match(Parameter,
+                "diss_NP" ~ "Distance N:P",
+                "mean_ndep" ~ "Mean N-deposition",
+                "distance" ~ "Geographical distance",
+                "diss_MAT" ~  "Distance MAP",
+                "diss_MAP" ~ "Distance MAT",
+                "diss_PET" ~ "Distance PET",
+                "diss_ndep" ~ "Distance N-deposition"),
+         p = case_when(p < 0.001 ~ "<0.001",
+                       TRUE ~ as.character(p)),
+         SE = as.character(SE)) %>% 
+  as_tibble() %>% 
+  dplyr::select(Parameter, Coefficient, SE, p) %>% 
+  add_row(Parameter = c("Pseudo R2", "Number of pairs"),
+          Coefficient = c(round(r2(sib)$R2, 3), nobs(sib))) %>%
+  replace_na(list(Coefficient = "-", SE = "", p = "")) %>% 
+  kable(caption = "Siberia")
+```

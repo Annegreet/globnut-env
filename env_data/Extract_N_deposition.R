@@ -52,6 +52,8 @@ names(file_names) <- c(years, 2021, 2022)
 ## Load data
 # globnut coordinates
 globnut <- read.csv("Z:/_GLOBNUT1.0/GlobNut1.0_metadata.csv") %>% 
+  dplyr::filter(between(lat, 35, 75)) %>% 
+  dplyr::filter(between(lon, -25, 150)) %>% 
   dplyr::select(plot_ID, lon, lat) %>%
   na.omit()
 
@@ -59,6 +61,7 @@ globnut <- read.csv("Z:/_GLOBNUT1.0/GlobNut1.0_metadata.csv") %>%
 # EMEP data 2020
 emep_2020 <- nc_open(file_names["2020"])
 emep_meta <- NetCDF(file_names["2020"])
+# plot(emep_meta)
 print(emep_2020) # check layers in file
 # latitude and longitude of the EMEP grid
 lat <- ncvar_get(emep_2020, "lat") 
@@ -203,15 +206,15 @@ glob_nhx <- terra::rasterize(glob_ndep_vect, r, "total_reduced_2016")
 plot(glob_nhx)
 
 # # Get plot IDs for plots without data
-# no_data <- tot_nhx %>% 
-#   filter(is.na(value)) %>% 
-#   pull(plot_ID) %>% 
+# no_data <- tot_nhx %>%
+#   filter(is.na(value)) %>%
+#   pull(plot_ID) %>%
 #   unique()
-# no_data <- meta %>% 
-#   filter(plot_ID %in% no_data) %>% 
-#   dplyr::select(plot_ID, lat, lon) %>% 
-#   mutate(across(.cols = everything(), ~as.numeric(.))) %>% 
-#   na.omit() 
+# no_data <- meta %>%
+#   filter(plot_ID %in% no_data) %>%
+#   dplyr::select(plot_ID, lat, lon) %>%
+#   mutate(across(.cols = everything(), ~as.numeric(.))) %>%
+#   na.omit()
 
 # extract 
 glob_nox_plot <- cbind(globnut[, c("plot_ID","lon","lat")], terra::extract(x = glob_nox, y = globnut[, c("lon","lat")])) %>% 
@@ -245,6 +248,8 @@ saveRDS(glob_ndep_plot, "env_data/outputs/Ackerman_ndeposition.rds")
 nox <- readRDS("env_data/outputs/EMEP_NOxdeposition.rds")
 nhx <- readRDS("env_data/outputs/EMEP_NHxdeposition.rds")
 missing_emep <- nox %>% 
+  dplyr::filter(between(lat, 35, 75)) %>% 
+  dplyr::filter(between(lon, -25, 150)) %>% 
   filter(is.na(value)) %>% 
   pull(plot_ID) %>% 
   unique
@@ -252,7 +257,9 @@ ack <- readRDS("env_data/outputs/Ackerman_ndeposition.rds") %>%
   # only plots not in emep data
   filter(plot_ID %in% missing_emep) %>% 
   mutate(obs_year = NA)
-meta <- read.csv("Z:/_GLOBNUT1.0/GlobNut1.0_metadata.csv")
+meta <- read.csv("Z:/_GLOBNUT1.0/GlobNut1.0_metadata.csv") %>% 
+  # for the plots sampled in 1989, take the ndep observation from 1990
+  mutate(year = ifelse(year == 1989, 1990, year))
 
 ## 5-year sum
 ## imputing missing years with last observation (i.e plots sampled between 1990 - 1994) or only observation of 2016 in case of ackerman plots
@@ -320,4 +327,4 @@ ndep_10yr_imp <- yr10 %>% # years needed
 ndep <- left_join(ndep_5yr_imp, ndep_10yr_imp, by = "plot_ID")
 
 # write to csv for globnut 1.0
-write.csv(ndep, "Z:/_GLOBNUT1.0/GlobNut1.0_ndeposition.csv")
+write.csv(ndep, "Z:/_GLOBNUT1.0/ndeposition.csv", row.names = FALSE,  fileEncoding = "UTF-8")

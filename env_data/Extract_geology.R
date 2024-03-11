@@ -64,7 +64,8 @@ lith_globnut <- cbind(globnut[, c("plot_ID","lon","lat")],
   dplyr::select(plot_ID, lat, lon, obs_year, var_name, value_chr = lith_code, unit, description, data_source, 
                 orig_res, data_url, data_citation)
 saveRDS(lith_globnut, file = "env_data/outputs/GLiM_lithology.rds")
-write.csv(lith_globnut, file = "Z:/_GLOBNUT1.0/lithology.csv")
+write.csv(lith_globnut, file = "Z:/_GLOBNUT1.0/lithology.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
 # plot
 lith_globnut %>%
   group_by(var_name) %>% 
