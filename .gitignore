@@ -2,12 +2,12 @@
 .Rhistory
 .RData
 .Ruserdata
-.rds
-.png
-.docx
-.csv
-.html
-.xlsx
+*.rds
+*.png
+*.docx
+*.csv
+*.html
+*.xlsx
 
 
 # ignore everything in Outputs (only to be kept locally)
