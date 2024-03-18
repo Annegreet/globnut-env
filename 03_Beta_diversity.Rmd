@@ -104,14 +104,6 @@ plotcounts  <- globnut %>%
   group_by(region, cell,cell_lon,cell_lat) %>% 
   summarise(count = n()) %>% 
   filter(count >= 5) 
-
-ggplot() +
-  geom_sf(data = europe, fill = NA, col = "black")  +
-  geom_point(data = plotcounts, aes(x = cell_lon, y = cell_lat, color = region), size = 1, alpha = 0.5) +
-  geom_rect(data = regions , aes(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax), fill = NA,colour = "black") +
-  scale_fill_gradient(low="blue", high="red") +
-  theme_bw() +
-  theme(legend.position = "bottom")
 ```
 
 ```{r plot selection}
@@ -122,7 +114,7 @@ plot_ids <- globnut %>%
   group_by(cell) %>% 
   mutate(n = n()) %>% 
   filter(n >= 5) %>% 
-  sample_n(size = 5, weight = freq_year) %>% 
+  sample_n(size = 5) %>% 
   dplyr::select(region, cell, plot_ID) %>% 
   filter(!is.na(region)) %>% 
   distinct()
@@ -163,7 +155,7 @@ env_data <- globnut %>%
   # get average per cell
   group_by(cell) %>% 
   summarise(across(ndep:NP, mean)) %>% 
-  left_join(plotcounts, by = "cell")
+  left_join(plotcounts, by = "cell") 
 ```
 
 
@@ -287,7 +279,7 @@ PET_diss <- dist(scale(env_data$PET)) %>%
   filter(region1 == region2) %>% 
   dplyr::select(-region1,-region2)
 
-# calculate mean between pairs for other environmental variables
+# calculate mean between pairs for NP and ndep
 NP_mean <- outer(env_data$NP, env_data$NP, FUN = "+") %>% # add plot pairs
   as.matrix() %>% 
   as.data.frame() %>% 
@@ -336,6 +328,7 @@ diss_spec %>%
 reg_data_beta <- diss_spec %>% 
   # join with predictors
   left_join(NP_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(NP_mean, by = c("member1", "member2", "cell1","cell2")) %>% 
   left_join(ndep_mean, by = c("member1", "member2", "cell1","cell2")) %>% 
   left_join(dist_geo, by = c("member1", "member2", "cell1","cell2")) %>% 
   left_join(MAT_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
@@ -349,6 +342,7 @@ reg_data_beta <- diss_spec %>%
 # west eu
 par(mfrow = c(2,2))
 west_eu <- betareg(beta ~ distance + 
+                     mean_np +
                mean_ndep + 
                diss_ndep +
                diss_NP  + 
@@ -358,12 +352,13 @@ west_eu <- betareg(beta ~ distance +
              data=reg_data_beta[reg_data_beta$region=="west_eu",])
 summary(west_eu)
 
-plot(west_eu, which = 1:4, type = "pearson", ask=FALSE)
-plot(west_eu, which = 5, type = "deviance", sub.caption = "")
+par(mfrow = c(2,2));plot(west_eu, which = 1:4, type = "pearson", ask=FALSE, main = "west_eu")
+plot(west_eu, which = 5, type = "deviance", sub.caption = "", main = "west_eu")
 
 # central europe
 central_eu <- betareg(beta ~ distance + 
                      mean_ndep + 
+                       mean_np + 
                      diss_ndep +
                      diss_NP  + 
                      diss_MAT + 
@@ -372,10 +367,11 @@ central_eu <- betareg(beta ~ distance +
                    data=reg_data_beta[reg_data_beta$region=="central_eu",])
 summary(central_eu)
 plot(central_eu, which = 1:4, type = "pearson", ask=FALSE, main = "central_eu")
-plot(central_eu, which = 5, type = "deviance", sub.caption = "")
+plot(central_eu, which = 5, type = "deviance", sub.caption = "", "central_eu")
 
 # north europe
 north_eu <- betareg(beta ~ distance + 
+                      mean_np +
                         mean_ndep + 
                         diss_ndep +
                         diss_NP  + 
@@ -385,10 +381,11 @@ north_eu <- betareg(beta ~ distance +
                       data=reg_data_beta[reg_data_beta$region=="north_eu",])
 summary(north_eu)
 plot(north_eu, which = 1:4, type = "pearson", ask=FALSE, main = "north_eu")
-# plot(north_eu, which = 5, type = "deviance", sub.caption = "")
+# plot(north_eu, which = 5, type = "deviance", sub.caption = "",  main = "north_eu")
 
 # east eu
 east_eu <- betareg(beta ~ distance + 
+                     mean_np +
                       mean_ndep + 
                       diss_ndep +
                       diss_NP  + 
@@ -398,10 +395,11 @@ east_eu <- betareg(beta ~ distance +
                     data=reg_data_beta[reg_data_beta$region=="east_eu",])
 summary(east_eu)
 plot(east_eu, which = 1:4, type = "pearson", ask=FALSE, main = "east_eu")
-plot(east_eu, which = 5, type = "deviance", sub.caption = "")
+plot(east_eu, which = 5, type = "deviance", sub.caption = "", "east_eu")
 
 # Siberia
 sib <- betareg(beta ~ distance + 
+                 mean_np +
                      mean_ndep + 
                      diss_ndep +
                      diss_NP  + 
@@ -411,11 +409,12 @@ sib <- betareg(beta ~ distance +
                    data=reg_data_beta[reg_data_beta$region=="sib",])
 summary(sib)
 plot(sib, which = 1:4, type = "pearson", ask=FALSE, main = "sib")
-plot(sib, which = 5, type = "deviance", sub.caption = "")
+plot(sib, which = 5, type = "deviance", sub.caption = "", main = "sib")
 
 # Kazachstan
 kaz <- betareg(beta ~ distance + 
                      mean_ndep + 
+                     mean_np +
                      diss_ndep +
                      diss_NP  + 
                      diss_MAT + 
@@ -424,11 +423,12 @@ kaz <- betareg(beta ~ distance +
                    data=reg_data_beta[reg_data_beta$region=="kaz",])
 summary(kaz)
 plot(kaz, which = 1:4, type = "pearson", ask=FALSE, main = "kaz")
-plot(kaz, which = 5, type = "deviance", sub.caption = "")
+plot(kaz, which = 5, type = "deviance", sub.caption = "", "kaz")
 
 # Jakutsk
 jak <- betareg(beta ~ distance + 
                      mean_ndep + 
+                     mean_np +
                      diss_ndep +
                      diss_NP  + 
                      diss_MAT + 
@@ -442,6 +442,7 @@ plot(jak, which = 5, type = "deviance", sub.caption = "")
 # Alps
 alp <- betareg(beta ~ distance + 
                      mean_ndep + 
+                     mean_np + 
                      diss_ndep +
                      diss_NP  + 
                      diss_MAT + 
@@ -453,7 +454,7 @@ plot(alp, which = 1:4, type = "pearson", ask=FALSE, main = "alp")
 plot(alp, which = 5, type = "deviance", sub.caption = "")
 ```
 
-```{r visualizations, echo=FALSE, fig.height=5,fig.width=9}
+```{r visualizations, echo=FALSE, dpi = 300, fig.height=5,fig.width=9}
 ## Visualizations ----
 pred_beta <- rbind(ggeffects::ggpredict(west_eu) %>%  do.call(bind_rows,.) %>% as.data.frame() %>% 
                      mutate(region = "west_eu"),
@@ -467,7 +468,17 @@ pred_beta <- rbind(ggeffects::ggpredict(west_eu) %>%  do.call(bind_rows,.) %>% a
        ggeffects::ggpredict(jak) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "jak"),
       ggeffects::ggpredict(kaz) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "kaz"),
       ggeffects::ggpredict(alp) %>%  do.call(bind_rows,.) %>% as.data.frame() %>%  mutate(region = "alps"))
-
+p_beta <- rbind(model_parameters(north_eu) %>% as.data.frame() %>% mutate(region = "north_eu"),
+      model_parameters(central_eu) %>% as.data.frame() %>% mutate(region = "central_eu"),
+      model_parameters(west_eu) %>% as.data.frame()  %>% mutate(region = "west_eu"),
+      model_parameters(east_eu) %>% as.data.frame()  %>% mutate(region = "east_eu"),
+      model_parameters(sib) %>% as.data.frame()  %>% mutate(region = "sib"),
+      model_parameters(jak) %>% as.data.frame()  %>% mutate(region = "jak"),
+      model_parameters(kaz) %>% as.data.frame()  %>% mutate(region = "kaz"),
+      model_parameters(alp) %>% as.data.frame()  %>% mutate(region = "alps")) %>% 
+  mutate(sig = ifelse(p < 0.05, "significant", "not-significant"))
+pred_beta <- pred_beta %>% 
+  left_join(p_beta, by = c("region", "group" = "Parameter"))
 coef_beta <- rbind(standardise_parameters(north_eu) %>% as.data.frame() %>% mutate(region = "north_eu"),
       standardise_parameters(central_eu) %>% as.data.frame() %>% mutate(region = "central_eu"),
       standardise_parameters(west_eu) %>% as.data.frame()  %>% mutate(region = "west_eu"),
@@ -492,6 +503,15 @@ region_label <- c(jak = paste0("Yakutsk (N = ", cellcounts$count[cellcounts$regi
                   south_eu = paste0("Iberian peninsula (N = ", 
                                     cellcounts$count[cellcounts$region == "south_eu"],")"))
 
+region_label2 <- c(jak = "Yakutsk", 
+                  north_eu = "Northeast Europe",
+                  kaz = "Kazachstan",
+                  west_eu = "West Europe",
+                  sib = "Siberia",
+                  central_eu = "Central Europe",
+                  east_eu ="East Europe",
+                  alps = "Alps", 
+                  south_eu = "Iberian peninsula")
 
 region_color <- c(jak = '#a65628',
                   north_eu = '#377eb8',
@@ -504,6 +524,7 @@ region_color <- c(jak = '#a65628',
                   south_eu = '#999999')
 var_labels <- c(diss_NP = "Distance N:P",
                 mean_ndep = "Mean N-deposition",
+                mean_np = "Mean N:P",
                 distance = "Geographical distance",
                 diss_MAT =  "Distance MAP",
                 diss_MAP = "Distance MAT",
@@ -513,44 +534,73 @@ var_labels <- c(diss_NP = "Distance N:P",
 # line graphs per environmental variable
 p1 <- pred_beta %>%
   filter(group == "mean_ndep") %>% 
+  mutate(region = factor(region, levels = c("west_eu","alps","central_eu", "east_eu", 
+                                            "north_eu", "kaz", "sib", "jak"))) %>% 
   ggplot(aes(x = exp(x)/1000, y = predicted, color = region, fill = region)) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.3, color = NA) +
-  geom_line() +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
+  geom_line(aes(linetype = sig)) +
   scale_x_continuous("Mean 5-year cumulative\nN-deposition (kg/ha)", trans = "log",
                      breaks = c(5,10,25,50,100,300),
                      labels = c(5,10,25,50,100,300)) +
-  scale_y_continuous("β-diversity", limits = c(0.7,1)) +
-  scale_fill_manual(values = region_color, labels = region_label) +
-  scale_color_manual(values = region_color, labels = region_label) +
+  scale_y_continuous("β-diversity", limits = c(0.65,1)) +
+  scale_fill_manual(values = region_color, labels = region_label2) +
+  scale_color_manual(values = region_color, labels = region_label2) +
+  scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
+  scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
   theme_bw() +
-  theme(legend.title = element_blank())
-
+  theme(legend.title = element_blank()) +
+  guides(alpha = "none", linetype= "none")
 p2 <- pred_beta %>%
-  filter(group == "diss_NP") %>% 
-  ggplot(aes(x = x, y = predicted, color = region, fill = region)) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.3, color = NA) +
-  geom_line() +
-  scale_x_continuous("Distance in N:P\n  ") +
-  scale_y_continuous("", limits = c(0.7,1)) +
-  scale_fill_manual(values = region_color, labels = region_label) +
-  scale_color_manual(values = region_color, labels = region_label) +
+  filter(group == "mean_np") %>% 
+    mutate(region = factor(region, levels = c("west_eu","alps","central_eu", "east_eu", 
+                                            "north_eu", "kaz", "sib", "jak"))) %>% 
+  ggplot(aes(x = exp(x), y = predicted, color = region, fill = region)) +
+   geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
+  geom_line(aes(linetype = sig)) +
+  scale_x_continuous("Mean N:P") +
+  scale_y_continuous("β-diversity", limits = c(0.65,1)) +
+  scale_fill_manual(values = region_color, labels = region_label2) +
+  scale_color_manual(values = region_color, labels = region_label2) +
+   scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
+  scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
   theme_bw() +
-  theme( #legend.position =  "bottom",
-        legend.title = element_blank())
-p3 <- p1 + p2 + patchwork::plot_layout(guides = "collect", nrow = 2, 
-                                                heights = c(5, 1), widths = c(8,8)) 
-ggsave("figures/Beta_np_ndep.png", p3, dpi = 300, height = 4, width = 9)
+  theme(legend.title = element_blank()) +
+  guides(alpha = "none", linetype= "none")
+p3 <- coef_beta %>% 
+  filter(Parameter %in% c("diss_NP", "diss_ndep", "mean_ndep", "mean_np")) %>% 
+  mutate(region = factor(region, levels = c("west_eu","alps","central_eu", "east_eu", 
+                                            "north_eu", "kaz", "sib", "jak"))) %>% 
+  mutate(Parameter = factor(Parameter, levels = c("diss_NP","mean_np",
+                                                  "diss_ndep", "mean_ndep"))) %>% 
+  ggplot(aes(x = Std_Coefficient, y = reorder(region, rev(region)), fill = region)) +
+  geom_vline(xintercept = 0, linetype = "dotted") +
+  geom_errorbar(aes(xmin = CI_low, xmax = CI_high),width = 0.2) +
+  geom_point(position = position_dodge(0.5), shape = 21, size = 2) +
+  scale_x_continuous("Standardized coefficient") +
+  scale_y_discrete("", labels = region_label2, limits = rev) +
+  scale_fill_manual(values = region_color) +
+  facet_wrap(~Parameter, ncol = 2, labeller = as_labeller(var_labels)) + 
+  theme_bw() +
+  theme(legend.position = "none",
+        strip.background = element_blank(),
+        strip.text = element_text(face = "bold"))
 
-p3
+
+p4 <- (p3|(p2/p1)) + plot_annotation(tag_levels = 'a') + plot_layout(guides = 'collect')
+  
+ggsave("figures/Beta_np_ndep.png", p4, dpi = 300, height = 5, width = 10)
+
+p4
 
 # dot plots
 p <- coef_beta %>% 
   filter(!Parameter == "(Intercept)") %>% 
-  # filter(Parameter %in% c("mean_ndep", "diss_NP", "diss_ndep")) %>% 
+  mutate(region = factor(region, levels = c("west_eu","alps","central_eu", "east_eu", 
+                                            "north_eu", "kaz", "sib", "jak"))) %>%  
   ggplot(aes(x = Std_Coefficient, y = Parameter, fill = region)) +
   geom_vline(xintercept = 0, linetype = "dotted") +
-  geom_point(position = position_dodge(0.5),shape =21) +
-  geom_errorbar(aes(xmin = CI_low, xmax = CI_high), position = position_dodge(0.5)) +
+  geom_errorbar(aes(xmin = CI_low, xmax = CI_high), width = 0.2) +
+  geom_point(position = position_dodge(0.5), shape = 21, size = 2) +
   scale_x_continuous("Standardized coefficient") +
   scale_y_discrete("",labels = var_labels) +
   scale_fill_manual(values = region_color) +
@@ -559,28 +609,45 @@ p <- coef_beta %>%
   theme(legend.position = "none")
 p
 
-ggsave("figures/Supp-beta-coef-plots.png",p, dpi = 300, height = 5, width = 9)
+ggsave("figures/Supp-beta-coef-plots.png", p, dpi = 300, height = 5, width = 9)
 
-var_labels2 <- c(MAT = "MAT (C)",
+var_labels2 <- c(MAT = "MAT (°C)",
                  PET ="PET (mm/yr)",
                  MAP = "MAP (mm/yr)(log)",
                  ndep = "N-deposition (kg/ha)(log)",
                  NP = "N:P (log)")
 # environmental variable - boxplot by region
 g <- env_data %>% 
+  filter(!region == "south_eu") %>% 
   dplyr::select(-cell_lat,-cell_lon,-count) %>% 
   pivot_longer(cols = ndep:NP, names_to = "var", values_to = "value") %>% 
   ggplot(aes(x = region, y = value, fill = region)) +
   geom_boxplot() +
   facet_wrap(~var, scales = "free_y", labeller = as_labeller(var_labels2)) +
-  scale_fill_manual(values = region_color, labels = region_label) +
-  scale_x_discrete("", labels = region_label) +
+  scale_fill_manual(values = region_color, labels = region_label2) +
+  scale_x_discrete("", labels = region_label2) +
   scale_y_continuous("") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
         legend.position = "none")
 g
 ggsave("figures/Sup_env_var_region.png",g, dpi = 300, height = 5, width = 7)
+```
+
+```{r map, dpi = 300, fig.height=5, fig.width=9}
+xlabs <- c(0,50,100,150)
+ylabs <- seq(35,70, by = 10)
+ggplot() +
+  geom_sf(data = europe, fill = NA, col = "black")  +
+  geom_point(data = plotcounts, aes(x = cell_lon, y = cell_lat, color = region), size = 1, alpha = 0.5) +
+  geom_rect(data = regions[regions$region != "south_eu",] , aes(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax), fill = NA,colour = "black") +
+  scale_color_manual("",values = region_color, labels = region_label) +
+  scale_x_continuous("Longitude", breaks = xlabs, labels = paste0(xlabs,'°E')) +
+  scale_y_continuous("Latitude", breaks = ylabs, labels = paste0(ylabs,'°N')) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+ggsave("figures/Regions-beta-div.png", dpi = 300, height = 5, width = 9)
+
 ```
 
 ```{r model outputs}
@@ -591,6 +658,7 @@ model_parameters(west_eu)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
@@ -613,6 +681,7 @@ model_parameters(east_eu)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
@@ -635,6 +704,7 @@ model_parameters(central_eu)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
@@ -657,6 +727,7 @@ model_parameters(north_eu)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
@@ -679,6 +750,7 @@ model_parameters(jak)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
@@ -701,6 +773,7 @@ model_parameters(kaz)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
@@ -723,6 +796,7 @@ model_parameters(sib)  %>%
   mutate(Parameter = case_match(Parameter,
                 "diss_NP" ~ "Distance N:P",
                 "mean_ndep" ~ "Mean N-deposition",
+                "mean_np" ~ "Mean N:P",
                 "distance" ~ "Geographical distance",
                 "diss_MAT" ~  "Distance MAP",
                 "diss_MAP" ~ "Distance MAT",
