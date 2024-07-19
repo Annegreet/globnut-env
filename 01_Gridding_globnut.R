@@ -19,17 +19,17 @@
 ## ---------------------------
 
 ## Load packages
-if(!require(tidyverse)) install.packages("tidyverse")
-if(!require(sf)) install.packages("sf")
-if(!require(dggridR)) install.packages("dggridR")
-if(!require(rnaturalearth)) install.packages("rnaturalearth")
-if(!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(sf)) install.packages("sf")
+if (!require(dggridR)) install.packages("dggridR")
+if (!require(rnaturalearth)) install.packages("rnaturalearth")
+if (!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
 
 ## Load data
 data_dir <- "Z:/_GLOBNUT1.0/" # directory with raw Globnut 1.0 data
 meta_env <- read.csv(paste0(data_dir, "Globnut1.0_env_variable_meta.csv"))
 globnut <- read.csv(paste0(data_dir, "Globnut1.0_metadata.csv")) %>% 
-  filter(!is.na(lat)|!is.na(lon)) 
+  filter(!is.na(lat) | !is.na(lon)) 
 
 # Construct a global grid with cells approximately 3.6 km2 (res 15), meaning the distance between center of adjacent cells is ~1.9km
 dggs <- dgconstruct(res = 15, metric = TRUE) # see table for different resolutions https://github.com/r-barnes/dggridR or dggetres()

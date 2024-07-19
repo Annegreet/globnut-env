@@ -19,9 +19,9 @@
 ## ---------------------------
 
 ## Load packages
-if(!require(tidyverse)) install.packages("tidyverse")
-if(!require(vegan)) install.packages("vegan")
-if(!require(readxl)) install.packages("readxl")
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(vegan)) install.packages("vegan")
+if (!require(readxl)) install.packages("readxl")
 
 ## Load data
 data_dir <- "Z:/_GLOBNUT1.0/" # directory with Globnut 1.0 data
