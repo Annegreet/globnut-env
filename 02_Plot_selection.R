@@ -20,7 +20,7 @@
 ## ---------------------------
 
 ## Load packages
-if(!require(tidyverse)) install.packages("tidyverse")
+if (!require(tidyverse)) install.packages("tidyverse")
 
 ## Load data
 data_dir <- "Z:/_GlobNut1.0/"
@@ -42,17 +42,12 @@ elev <- read.csv(paste0(data_dir, "GlobNut1.0_env_variable.csv")) %>%
 # response
 npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>% 
   # add column with nutrient limitation
-  mutate(lim = case_when(NP < 10 & NK < 2.1 & N < 2.0 ~ "N-limitation", 
-                         NP > 16 & KP > 3.4 & P < 0.11 ~ "P-limitation", 
-                         NK >= 2.1 & KP < 3.4 & K < 0.8 ~  "K(co)-limitation", 
-                         NP >= 10 & NP < 16 & KP >= 3.4 ~ "Co-limitation N-P",
-                         P >= 0.11 & N >= 2.0 & K >= 0.8 ~ "No limitation by N, P, K",
-                         TRUE ~ "Unclear"),
-         lim_ratio = case_when(NP < 10 & NK < 2.1 ~ "N-limitation", 
-                               NP > 16 & KP > 3.4 ~ "P-limitation", 
-                               NK >= 2.1 & KP < 3.4 ~  "K(co)-limitation", 
-                               NP >= 10 & NP < 16 & KP > 3.4 ~ "Co-limitation N-P",
-                               TRUE ~ "Unclear")) 
+  mutate(lim = case_when(NP <= 13.5 & NK <= 2.1 ~ "N-limitation", 
+                         NP > 16 & KP > 3.4 ~ "P-limitation", 
+                         NK > 2.1 & KP < 3.4 ~  "K(co)-limitation", 
+                         NP >= 13.5 & NP < 16 ~ "Co-limitation N-P",
+                         TRUE ~ "No limitation by N, P, K"))
+
 meta <- read.csv(paste0(data_dir, "GlobNut1.0_metadata.csv"))
 grid <- readRDS("outputs/01_Globnut_grid_res15.rds") %>% 
   rename(plot_ID = globnut.plot_ID) %>% 
@@ -83,20 +78,20 @@ globnut <- globnut_raw %>%
                 ndep = sum_5yr, MAT, MAP, PET, N, P, K, NP, lim, biomass) %>% 
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year,-elev,-MAT,-MAP,-PET) %>% 
-  # filter K-limited and unclear limitation plots
-  filter(!lim %in% c("Unclear",  "K(co)-limitation", "No limitation N, P, K")) %>% 
+  # filter K-limited and no limitation plots
+  filter(!lim %in% c("K(co)-limitation", "No limitation N, P, K")) %>% 
   # filter out outliers with high biomass (potential filter)
-  mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) %>% 
+  mutate(z_biomass = (biomass - mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
   dplyr::select(-z_biomass)
-# saveRDS(globnut, "outputs/02_GlobNut.rds")
+saveRDS(globnut, "outputs/02_GlobNut.rds")
 
 # sub sampled data set to check the effect of oversample areas - 5 per cell
 set.seed(123)
 globnut_samp <- globnut %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-# saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled.rds")
+saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled.rds")
 
 # check for effect of grid size
 grid14 <- readRDS("outputs/01_Globnut_grid_res14.rds")
@@ -105,7 +100,7 @@ globnut_samp <- globnut %>%
   left_join(grid14, by = c("plot_ID" = "globnut.plot_ID")) %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-# saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled14.rds")
+saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled14.rds")
 
 grid16 <- readRDS("outputs/01_Globnut_grid_res16.rds")
 globnut_samp <- globnut %>%
@@ -113,7 +108,7 @@ globnut_samp <- globnut %>%
   left_join(grid16, by = c("plot_ID" = "globnut.plot_ID")) %>% 
   group_by(cell) %>%
   slice_sample(n = 5, replace = FALSE)
-# saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled16.rds")
+saveRDS(globnut_samp, "outputs/02_GlobNut_subsampled16.rds")
 
 # check effect of ndeposition cummulative 10
 globnut <- grid %>%
@@ -136,7 +131,7 @@ globnut <- grid %>%
   # filter K-limited and unclear limitation plots
   filter(!lim %in% c("Unclear",  "K(co)-limitation")) %>% 
   # filter out outliers with high biomass (potential filter)
-  mutate(z_biomass = (biomass-mean(biomass))/sd(biomass)) %>% 
+  mutate(z_biomass = (biomass - mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
   dplyr::select(-z_biomass) %>% 
   group_by(cell) %>%
