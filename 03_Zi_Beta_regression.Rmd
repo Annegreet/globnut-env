@@ -1,0 +1,542 @@
+---
+title: "03_zi_beta_regression"
+author: "Annegreet Veeken"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# References:
+# - Borcard (2018). Numerical Ecology in R
+
+## Load packages
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(knitr)) install.packages("knitr")
+if (!require(vegan)) install.packages("vegan")
+if (!require(geosphere)) install.packages("geosphere")
+if (!require(terra)) install.packages("terra")
+if (!require(raster)) install.packages("raster")
+if (!require(easystats)) install.packages("easystats")
+if (!require(sf)) install.packages("sf")
+if (!require(rnaturalearth)) install.packages("rnaturalearth")
+if (!require(rnaturalearthdata))  install.packages("rnaturalearthdata")
+if (!require(patchwork)) install.packages("patchwork")
+if (!require(ggalt)) install.packages("ggalt")
+if (!require(brms)) install.packages("brms")
+if (!require(broom)) install.packages("broom")
+if (!require(tidybayes)) install.packages("tidybayes")
+if (!require(modelr)) install.packages("modelr")
+```
+
+```{r load data}
+## Load data ----
+dir <- "Z:/_GLOBNUT1.0/"
+globnut <- readRDS("outputs/02_GlobNut.rds") %>% 
+  ungroup() %>% 
+  filter(!lim == "No limitation by N, P, K") %>% 
+  dplyr::filter(between(lat, 35, 75)) %>% 
+  dplyr::filter(between(lon, -25, 150)) %>% 
+  drop_na %>% 
+  mutate(ndep = log(ndep*10), # to g/ha en log
+         MAP = log(MAP),
+         NP = log(NP)) %>%
+  dplyr::select(plot_ID, lon,lat, sample_year, ndep, MAP, MAT, PET, NP, biomass, elev) %>% 
+  drop_na() 
+
+# Use EMEP raster for aggregating plots
+masras <- raster("Z:/geo_data/EMEP/Data_EMEP_report2023/EMEP01_rv5.0_year.2022met_2021emis.nc")
+masras <- extend(masras, extent(-25,150,35,75))
+values(masras) <- 1:ncell(masras)
+
+# Get the corresponding grid cells for each plot
+globnut$cell <- terra::extract(x = masras, y = as.matrix(globnut[,c("lon","lat")]))
+globnut$cell_lon <- xFromCell(masras, globnut$cell) 
+globnut$cell_lat <- yFromCell(masras, globnut$cell) 
+
+# species data
+spec_raw <- read.csv(paste0(dir, "GlobNut1.0_species.csv"))
+```
+
+## Ecoregions
+
+Criteria for selection of regions:
+
+-   at least 10 cells within ecoregion
+
+-   at least 5 plots per cell
+
+```{r ecoregions}
+## Extract ecoregions for globnut
+# ecoregions <- terra::vect("C:/Users/3768651/OneDrive - Universiteit Utrecht/Documents/Projects/Ongoing/ESy/data/Ecoregions2017/Ecoregions2017.shp")
+# ecoregions <- terra::rasterize(ecoregions, masras, "ECO_NAME")
+# # crs(ecoregions)
+# coords <- globnut %>% 
+#   select(cell, cell_lon, cell_lat) %>% 
+#   distinct()
+# 
+# ecoreg_globnut <- cbind(cell = coords[,c("cell")], 
+#                         terra::extract(ecoregions, coords[,c("cell_lon", "cell_lat")]))
+# 
+# saveRDS(ecoreg_globnut, "outputs/Ecoregions_emep_grid.rds")
+ecoreg_globnut <- readRDS("outputs/Ecoregions_emep_grid.rds")
+
+# add to globnut
+globnut <- globnut %>% 
+  left_join(ecoreg_globnut, by = "cell") %>% 
+  rename(region = ECO_NAME) 
+
+# check amount of cells with enough plots per region
+plotcounts  <- globnut %>% 
+  group_by(region, cell, cell_lon, cell_lat) %>% 
+  summarise(count = n()) %>% 
+  filter(count >= 5)
+```
+
+```{r plot selection}
+## Select plots for analysis ----
+set.seed(1234)
+# randomly select 5 samples per cell
+plot_ids <- globnut %>%
+  group_by(cell) %>% 
+  mutate(n = n()) %>% 
+  filter(n >= 5) %>% 
+  sample_n(size = 5) %>% 
+  dplyr::select(region, cell, plot_ID) %>% 
+  filter(!is.na(region)) %>% 
+  distinct()
+
+cellcounts  <- globnut %>% 
+  filter(plot_ID %in% plot_ids$plot_ID) %>% 
+  group_by(region) %>% 
+    summarise(count = n_distinct(cell)) %>% 
+  arrange(desc(count))
+region_alias <- data.frame(region = c("Alps conifer and mixed forests","Central European mixed forests",
+                                      "East Siberian taiga","European Atlantic mixed forests",
+                                      "Kazakh steppe","Pannonian mixed forests",
+                                      "Western European broadleaf forests"),
+                           alias = c("alps", "north_eu", "jak", "west_eu", "kaz", "east_eu", "central_eu"),
+                           label = c("Alps", "Northeastern Europe", "Yakutsk", "Western Europe", 
+                                     "Kazachstan", "Eastern Europe", "Central Europe"))
+cellcounts %>% 
+  left_join(region_alias, by = "region") %>% 
+  slice_head(n = 10) %>% 
+  kable()
+
+# regions with at least 10 cells
+reg <- cellcounts %>% 
+  filter(count >= 10) %>% 
+  pull(region)
+
+sf::sf_use_s2(FALSE)
+europe <- ne_countries(scale = "medium", 
+                       # country = country,
+                       returnclass = "sf") %>% 
+  # fix geometry of russia (sf_use_s2() must be FALSE for this)
+  st_make_valid() %>% 
+  st_crop(., c(xmin = -25, ymin = 35, xmax = 150, ymax = 72)) 
+
+ggplot() +
+  geom_sf(data = europe, fill = NA, col = "black")  +
+  geom_point(data = plotcounts[plotcounts$region %in% reg, ],
+             aes(x = cell_lon, y = cell_lat, color = region), size = 1, 
+             alpha = 0.5) +
+  geom_encircle(data = plotcounts[plotcounts$region %in% reg, ], 
+                aes(x = cell_lon, y = cell_lat, group = region, color = region),
+                expand = 0) +
+  geom_point(data = plotcounts[!plotcounts$region %in% reg,],
+             aes(x = cell_lon, y = cell_lat), size = 1, 
+             color = "grey",alpha = 0.5) +
+  scale_x_continuous("Longitude") +
+  scale_y_continuous("Latitude") +
+  # scale_color_manual(values = region_color, labels = region_label) +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.title = element_blank())
+```
+
+```{r prepare data}
+## Prepare data ----
+spec <- spec_raw %>% 
+  ungroup() %>% 
+  # only vascular plants
+  dplyr::filter(vascular_plant == 1) %>% 
+  # convert subspecies to species
+  mutate(species_new = 
+           str_remove(species_new, pattern = " subsp.*| var\\.")) %>%
+  group_by(plot_ID, species_new) %>% # aggregate by species
+  summarise(cover = sum(cover, na.rm = TRUE)) %>% 
+  dplyr::filter(cover != 0)  %>% 
+  #  to 100 %
+  group_by(plot_ID) %>% 
+  mutate(covertot = sum(cover), 
+         cover = round(cover/covertot*100)) %>% 
+  # Average abundance per cell
+  left_join(globnut[,c("cell", "plot_ID")], by = "plot_ID") %>% 
+  filter(plot_ID %in% plot_ids$plot_ID) %>%  # select for sampled plots
+  group_by(cell, species_new) %>% 
+  summarise(cover = mean(cover)) 
+
+spec_wide <- spec  %>% 
+   dplyr::select(cell, species_new, cover) %>% 
+  # convert to wide to calculate diversity measures
+  pivot_wider(names_from = species_new, 
+              values_from = cover, values_fill = 0) 
+
+# Prepare environmental data
+env_data <- globnut %>% 
+  # filter for selected plots
+  filter(plot_ID %in% plot_ids$plot_ID) %>% 
+  # get average per cell
+  group_by(cell) %>% 
+  summarise(across(all_of(c("MAT","MAP","PET","NP","biomass","ndep","elev")), mean)) %>% 
+  left_join(plotcounts, by = "cell")
+```
+
+```{r dissimilarity}
+## Dissimilarity calculations
+# calculate bray curtis dissimilarity 
+cell_names <- plot_ids %>% 
+  ungroup %>% 
+  dplyr::select(-plot_ID) %>% 
+  distinct() %>% 
+  mutate(member = 1:nrow(.))
+
+diss_spec <-   
+  # calculate dissimilarity as Bray-curtis (aka percentage difference)
+  vegdist(decostand(spec_wide[,-1], method = "hellinger"), method = "bray") %>% 
+  # convert to dataframe, to long format and add plot pair to facilitate merge with environmental dat
+  as.matrix(.) %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(cols = !member1, names_to = "member2", values_to = "beta") %>% 
+  mutate(member2 = as.numeric(member2)) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1)  %>% 
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) 
+
+# Calculate geographical distance plot pairs
+coordinates <- env_data[,c("cell_lon","cell_lat")]
+dist_geo <- distm(coordinates, fun = distGeo) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "distance") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2"))  %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2) %>% 
+  mutate(distance = scale(distance))
+
+# Calculate dissimilarity (euclidean) in environmental variables for plot pairs 
+NP_diss <- dist(scale(env_data$NP)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_NP") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+ndep_diss <- dist(scale(env_data$ndep)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_ndep") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+MAT_diss <- dist(scale(env_data$MAT)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_MAT") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+MAP_diss <- dist(scale(env_data$MAP)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_MAP") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+PET_diss <- dist(scale(env_data$PET)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_PET") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+
+biomass_diss <- dist(scale(env_data$biomass)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_biomass") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+elev_diss <- dist(scale(env_data$elev)) %>%  
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "diss_elev") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric()) %>% 
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+
+
+# calculate mean between pairs for NP and ndep
+NP_mean <- outer(env_data$NP, env_data$NP, FUN = "+") %>% # add plot pairs
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "mean_np") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric(),
+         mean_np = mean_np/2) %>% # get mean
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+
+ndep_mean <- outer(env_data$ndep, env_data$ndep, FUN = "+") %>% # add plot pairs
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", values_to = "mean_ndep") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>% as.numeric(),
+         mean_ndep = mean_ndep/2) %>% # get mean
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+
+biomass_mean <- outer(env_data$biomass, env_data$biomass, FUN = "+") %>% # add plot pairs
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  mutate(member1 = 1:nrow(.)) %>% 
+  pivot_longer(-member1, names_to = "member2", 
+               values_to = "mean_biomass") %>% 
+  mutate(member2 = str_remove(member2, pattern = "V") %>%
+           as.numeric(),
+         mean_biomass = mean_biomass/2) %>% # get mean
+  # filter plots that compare to themselves
+  filter(!member1 == member2) %>% 
+  # filter doubles e.g. pairs 1-2 and 2-1
+  filter(member2 > member1) %>% 
+  # add plot ids
+  left_join(cell_names, by = c("member1" = "member")) %>% 
+  left_join(cell_names, by = c("member2" = "member"), suffix = c("1","2")) %>% 
+  filter(region1 == region2) %>% 
+  dplyr::select(-region1,-region2)
+```
+
+```{r bayesian}
+
+reg_data <- diss_spec %>% 
+  # join with predictors
+  left_join(NP_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(ndep_mean, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(NP_mean, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(biomass_mean, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(dist_geo, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(MAT_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(MAP_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(PET_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(ndep_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(biomass_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  left_join(elev_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
+  dplyr::select(member1, member2, cell1, cell2, region = region1, -region2, everything()) 
+
+
+m_brm <- brm(bf(1 - beta ~ # 1 minus beta to allow zero-inflated model
+                  distance + 
+               mean_ndep + 
+               mean_np +
+               mean_biomass +
+               diss_ndep +
+               diss_NP  + 
+               diss_MAT + 
+               diss_MAP + 
+               diss_PET + 
+               diss_biomass +
+              diss_elev +
+              region,
+              zi ~ region),
+             data = reg_data,
+  family = zero_inflated_beta(),
+  chains = 4, iter = 2000, warmup = 1000,
+  cores = 4, seed = 1234,
+  file = "outputs/brms_model_fe_region.rds")
+
+# check ess
+summary(m_brm)
+# convergence checks
+bayesplot::mcmc_trace(m_brm) %>% 
+  ggsave("figures/model_checks/full_model_ecoregion.pdf", .,
+                                      height = 11.7, width = 8.3)
+# residual check
+m_brm %>% 
+  add_predicted_draws(m_brm) %>%
+        summarise(p_residual = mean(.prediction < 1 - beta),
+                  z_residual = qnorm(p_residual),
+                  .groups = "drop_last") %>%
+        ggplot(aes(sample = z_residual)) +
+        geom_qq() +
+        geom_abline()
+
+```
+
+```{r visualization}
+y_lim <- c(0.4,1)
+p1 <- reg_data %>%
+  ungroup() %>% 
+  data_grid(diss_NP = mean(diss_NP),
+            mean_ndep = seq_range(mean_ndep, n = 20),
+            mean_np = mean(mean_np),
+            mean_biomass = mean(mean_biomass),
+            distance = mean(distance),
+            diss_MAT = mean(diss_MAT),
+            diss_MAP = mean(diss_MAP),
+            diss_PET = mean(diss_PET),
+            diss_ndep = mean(diss_ndep),
+            diss_biomass = mean(diss_biomass),
+            diss_elev = mean(diss_elev), 
+            region = NA) %>%
+  add_epred_rvars(m_brm) %>% 
+  ggplot(aes(x = (exp(mean_ndep)/1000)/5)) +
+  stat_lineribbon(aes(ydist = 1 - .epred), .width = 0.95,
+                  alpha = 0.5) + #back transform to dissimilarity
+  scale_x_continuous("Average annual N-deposition (kg/ha)", trans = "log",
+                     breaks = c(1,2,5,10,20,60),
+                     labels = c(1,2,5,10,20,60)) +
+  scale_y_continuous("Variation between communities", limits = y_lim) +
+  theme_bw() 
+p1
+p2 <- reg_data %>%
+  ungroup() %>% 
+  data_grid(diss_NP = mean(diss_NP),
+            mean_ndep = mean(mean_ndep),
+            mean_np = seq_range(mean_np, n = 20),
+            mean_biomass = mean(mean_biomass),
+            distance = mean(distance),
+            diss_MAT = mean(diss_MAT),
+            diss_MAP = mean(diss_MAP),
+            diss_PET = mean(diss_PET),
+            diss_ndep = mean(diss_ndep),
+            diss_biomass = mean(diss_biomass),
+            diss_elev = mean(diss_elev), 
+            region = NA) %>%
+  add_epred_rvars(m_brm) %>% 
+  ggplot(aes(x = exp(mean_np))) +
+  stat_lineribbon(aes(ydist = 1 - .epred), .width = 0.95,  alpha = 0.5, 
+                  fill = "grey", colour = "black") + #back transform to dissimilarity
+  scale_x_continuous("N/P") +
+  scale_y_continuous("Variation between communities", limits = y_lim) +
+  theme_bw() +
+  theme(legend.position = "None")
+
+p3 <- reg_data %>%
+  ungroup() %>% 
+  data_grid(diss_NP = mean(diss_NP),
+            mean_ndep = mean(mean_ndep),
+            mean_np = mean(mean_np),
+            mean_biomass = seq_range(mean_biomass, n = 20),
+            distance = mean(distance),
+            diss_MAT = mean(diss_MAT),
+            diss_MAP = mean(diss_MAP),
+            diss_PET = mean(diss_PET),
+            diss_ndep = mean(diss_ndep),
+            diss_biomass = mean(diss_biomass),
+            diss_elev = mean(diss_elev), 
+            region = NA) %>%
+  add_epred_rvars(m_brm) %>% 
+  ggplot(aes(x = exp(mean_biomass))) +
+  stat_lineribbon(aes(ydist = 1 - .epred), .width = 0.95,  alpha = 0.5, 
+                  fill = "grey", colour = "black") + #back transform to dissimilarity
+  scale_x_continuous("Biomass (g/m2)") +
+  scale_y_continuous("Variation between communities", limits = y_lim) +
+  theme_bw() +
+  theme(legend.position = "None")
+```
+
+```{r model_output}
+all_param <- parameters(m_brm, effects = "all", component = "all", verbose = "all")
+all_param
+plot(all_param)
+
+```
+
