@@ -1,5 +1,5 @@
 # Globnut env
-Repo contains XX
+Repo contains code for the article "Eurasian plant diversity will benefit from lowering N deposition and preserving N/P variation" (in prep).
 
 ## Reproducibility
 Users are encouraged to use the renv package to make sure they all use the same package versions.
