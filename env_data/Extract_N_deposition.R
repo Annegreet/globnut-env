@@ -21,17 +21,17 @@
 
 
 ## Load packages
-if(!require(tidyverse)) install.packages("tidyverse")
-if(!require(ncdf4)) install.packages("ncdf4")
-if(!require(ncdump)) install.packages("ncdump")
-if(!require(raster)) install.packages("raster")
-if(!require(terra)) install.packages("terra")
-if(!require(sf)) install.packages("sf")
-if(!require(rnaturalearth)) install.packages("rnaturalearth")
-if(!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(ncdf4)) install.packages("ncdf4")
+if (!require(ncdump)) install.packages("ncdump")
+if (!require(raster)) install.packages("raster")
+if (!require(terra)) install.packages("terra")
+if (!require(sf)) install.packages("sf")
+if (!require(rnaturalearth)) install.packages("rnaturalearth")
+if (!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
 
 ## EMEP data (europe/russia) ----
-if(1) {
+if (1) {
 ## Download EMEP data (only need to do this once!) https://www.emep.int/mscw/mscw_moddata.html
   # The NetCDF files have the following convention:
   #   {GRID}_{MODEL VERSION}_{TIME RESOLUTION}.{YEAR}met_{EMISSION YEAR}emis_({REPORTING YEAR}).nc
@@ -186,7 +186,7 @@ saveRDS(tot_nhx, file = "env_data/outputs/EMEP_NHxdeposition.rds")
 }
 
 # Supplement missing values with global nitrogen data from Ackerman etal. (2019) ----
-if(1){
+if (1) {
 # load in data
 tot_nhx <- readRDS("env_data/outputs/EMEP_NHxdeposition.rds")
 tot_nox <- readRDS("env_data/outputs/EMEP_NOxdeposition.rds")
@@ -269,7 +269,7 @@ yr5 <- meta[, c("plot_ID", "year")] %>%
   mutate(start_year = year - 4, end_year = year, year = NULL) %>% 
   na.omit()
 l <- list() # surely this can be done nicer than a loop?
-for (i in 1:nrow(yr5)){
+for (i in 1:nrow(yr5)) {
   t <- expand.grid(plot_ID = yr5[i,]$plot_ID, obs_year = yr5[i,]$start_year:yr5[i,]$end_year)
   l[[i]] <- t
 }
@@ -305,7 +305,7 @@ yr10 <- meta[, c("plot_ID", "year")] %>%
   na.omit()
 
 l <- list() # surely this can be done nicer than a loop?
-for (i in 1:nrow(yr10)){
+for (i in 1:nrow(yr10)) {
   t <- expand.grid(plot_ID = yr10[i,]$plot_ID, obs_year = yr10[i,]$start_year:yr10[i,]$end_year)
   l[[i]] <- t
 }
@@ -328,3 +328,57 @@ ndep <- left_join(ndep_5yr_imp, ndep_10yr_imp, by = "plot_ID")
 
 # write to csv for globnut 1.0
 write.csv(ndep, "Z:/_GLOBNUT1.0/ndeposition.csv", row.names = FALSE,  fileEncoding = "UTF-8")
+
+
+## Base map for fig 1
+# EMEP
+dnox_2020 <- raster(nox_raster$X2020)
+dnhx_2020 <- raster(nhx_raster$X2020)
+wnox_2020 <- raster(wnox_raster$X2020)
+wnhx_2020 <- raster(wnhx_raster$X2020)
+# cumulative
+ndep_emep <- calc(stack(dnox_2020, dnhx_2020,wnox_2020,wnhx_2020), sum) * 0.01  # tp g/ha
+# ndep_emep <- raster::aggregate(ndep_emep, fact =5, fun = mean)
+plot(ndep_emep)
+# global
+ndep_global <- calc(stack(raster(glob_nhx), raster(glob_nox)), sum ) * 0.01 # to g/ha
+plot(ndep_global)
+
+# combine emep and ackerman
+
+# crop and resample ackerman to resolution of emep
+ras_extent <- raster(xmn = 90, xmx = 150, ymn = 30, ymx = 82, res = raster::res(ndep_emep))
+resample_ndep <- raster::resample(ndep_global, ras_extent, method = "bilinear") 
+ndep_comb <- raster::merge(ndep_emep, resample_ndep)
+raster::writeRaster(ndep_comb, "figures/Files_Ton/ndeposition.tif",format = "GTiff", overwrite = T)
+
+
+# Euroasia shape file
+sf::sf_use_s2(FALSE)
+europe <- ne_countries(scale = "medium",
+                       # country = country,
+                       returnclass = "sf") %>%
+  # fix geometry of russia (sf_use_s2() must be FALSE for this)
+  st_make_valid() %>%
+  st_crop(., c(xmin = -25, ymin = 35, xmax = 150, ymax = 72))
+
+ndep  <- mask(ndep_comb, europe)
+
+r_df <- as.data.frame(ndep, xy = TRUE)
+colnames(r_df) <- c("x", "y", "value")
+
+r_df <- r_df %>%
+  mutate(category = cut(value, breaks = c(-Inf, 5, 10, 20, 40, Inf),
+                        labels = c("< 5", "5-10", "10-20", "20-40", "> 40")))
+
+ggplot(r_df, aes(x = x, y = y, fill = category)) +
+  geom_raster() +
+  scale_fill_manual(values = c("< 5" = "grey90",
+                               "5-10" = "grey70",
+                               "10-20" = "grey50",
+                               "20-40" = "grey30",
+                               "> 40" = "grey10"),na.translate = FALSE) +
+  labs(fill = "kg N/ha/yr") +
+  theme_minimal() +
+  theme(legend.position = "right")
+ggsave("figures/Files_Ton/Base_map_ndep.pdf", dpi = 300)
