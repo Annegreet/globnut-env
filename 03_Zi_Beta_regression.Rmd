@@ -30,6 +30,7 @@ if (!require(brms)) install.packages("brms")
 if (!require(broom)) install.packages("broom")
 if (!require(tidybayes)) install.packages("tidybayes")
 if (!require(modelr)) install.packages("modelr")
+if (!require(vcd)) install.packages("vcd")
 ```
 
 ```{r load data}
@@ -43,7 +44,8 @@ globnut <- readRDS("outputs/02_GlobNut.rds") %>%
   drop_na %>% 
   mutate(ndep = log(ndep*10), # to g/ha en log
          MAP = log(MAP),
-         NP = log(NP)) %>%
+         NP = log(NP),
+         biomass = log(biomass)) %>%
   dplyr::select(plot_ID, lon,lat, sample_year, ndep, MAP, MAT, PET, NP, biomass, elev) %>% 
   drop_na() 
 
@@ -114,13 +116,26 @@ cellcounts  <- globnut %>%
   group_by(region) %>% 
     summarise(count = n_distinct(cell)) %>% 
   arrange(desc(count))
-region_alias <- data.frame(region = c("Alps conifer and mixed forests","Central European mixed forests",
+
+region_alias <- data.frame(region = c("Alps conifer and mixed forests",
+                                      "Central European mixed forests",
                                       "East Siberian taiga","European Atlantic mixed forests",
                                       "Kazakh steppe","Pannonian mixed forests",
                                       "Western European broadleaf forests"),
-                           alias = c("alps", "north_eu", "jak", "west_eu", "kaz", "east_eu", "central_eu"),
-                           label = c("Alps", "Northeastern Europe", "Yakutsk", "Western Europe", 
-                                     "Kazachstan", "Eastern Europe", "Central Europe"))
+                           alias = c("alps", "north_eu", "jak", "west_eu", "kaz", 
+                                     "east_eu", "central_eu"),
+                           label = c("Alps", "Northeastern Europe", "Yakutsk", "Western Europe",
+                                     "Kazakhstan", "Eastern Europe", "Central Europe"))
+region_color <- c("Alps conifer and mixed forests" = '#f781bf',
+                  "Central European mixed forests" = '#377eb8',
+                  "East Siberian taiga" = '#a65628',
+                  "European Atlantic mixed forests" = '#984ea3',
+                  "Kazakh steppe" = '#4daf4a',
+                  "Pannonian mixed forests" = '#e41a1c',
+                  "Western European broadleaf forests" = '#ff7f00')
+region_label <- region_alias$label
+names(region_label) <- region_alias$region
+
 cellcounts %>% 
   left_join(region_alias, by = "region") %>% 
   slice_head(n = 10) %>% 
@@ -152,10 +167,11 @@ ggplot() +
              color = "grey",alpha = 0.5) +
   scale_x_continuous("Longitude") +
   scale_y_continuous("Latitude") +
-  # scale_color_manual(values = region_color, labels = region_label) +
+  scale_color_manual(values = region_color, labels = region_label) +
   theme_bw() +
   theme(legend.position = "bottom",
         legend.title = element_blank())
+ggsave("figures/Regions-beta-div.png", height = 5, width = 7)
 ```
 
 ```{r prepare data}
@@ -192,7 +208,8 @@ env_data <- globnut %>%
   filter(plot_ID %in% plot_ids$plot_ID) %>% 
   # get average per cell
   group_by(cell) %>% 
-  summarise(across(all_of(c("MAT","MAP","PET","NP","biomass","ndep","elev")), mean)) %>% 
+  summarise(across(all_of(c("MAT","MAP","PET","NP",
+                            "biomass","ndep","elev")), mean)) %>% 
   left_join(plotcounts, by = "cell")
 ```
 
@@ -404,8 +421,8 @@ biomass_mean <- outer(env_data$biomass, env_data$biomass, FUN = "+") %>% # add p
   dplyr::select(-region1,-region2)
 ```
 
-```{r bayesian}
-
+# Chi-square
+```{r chisquare}
 reg_data <- diss_spec %>% 
   # join with predictors
   left_join(NP_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
@@ -419,12 +436,28 @@ reg_data <- diss_spec %>%
   left_join(ndep_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
   left_join(biomass_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
   left_join(elev_diss, by = c("member1", "member2", "cell1","cell2")) %>% 
-  dplyr::select(member1, member2, cell1, cell2, region = region1, -region2, everything()) 
+  dplyr::select(member1, member2, cell1, cell2, region = region1,  everything()) %>%   dplyr::select(-region2) %>% 
+    # filter for regions with enough data
+  right_join(region_alias, by = "region") 
 
+# count table plots with total dissimilarity per region
+count_one <- reg_data %>%
+  mutate(is_one = ifelse(beta == 1, "One", "Not one"))
+table(count_one$alias, count_one$is_one)
+x2 <- chisq.test(table(count_one$is_one, count_one$alias))
+x2
 
-m_brm <- brm(bf(1 - beta ~ # 1 minus beta to allow zero-inflated model
+mosaic(~alias + is_one, data = count_one,  shade = TRUE, rot_labels = c(0,90,0,0),
+       just_labels = "right", varnames = FALSE)
+
+```
+
+# model 1
+Zero-inflation modeled as region + all geographical/environmental distance
+```{r}
+m_logit_full <- brm(bf(1 - beta ~ # 1 minus beta to allow zero-inflated model
                   distance + 
-               mean_ndep + 
+               mean_ndep +
                mean_np +
                mean_biomass +
                diss_ndep +
@@ -435,35 +468,43 @@ m_brm <- brm(bf(1 - beta ~ # 1 minus beta to allow zero-inflated model
                diss_biomass +
               diss_elev +
               region,
-              zi ~ region),
+              zi ~ region + distance + 
+               diss_ndep +
+               diss_NP  + 
+               diss_MAT + 
+               diss_MAP + 
+               diss_PET + 
+               diss_biomass +
+              diss_elev),
              data = reg_data,
-  family = zero_inflated_beta(),
+  family = zero_inflated_beta(link = "logit"),
   chains = 4, iter = 2000, warmup = 1000,
   cores = 4, seed = 1234,
-  file = "outputs/brms_model_fe_region.rds")
+  file = "outputs/brms_model_logit.rds",
+  file_refit = "on_change")
 
-# check ess
-summary(m_brm)
+summary(m_logit_full)
 # convergence checks
-bayesplot::mcmc_trace(m_brm) %>% 
-  ggsave("figures/model_checks/full_model_ecoregion.pdf", .,
+bayesplot::mcmc_trace(m_logit_full) %>% 
+  ggsave("figures/model_checks/full_model_zi_full.pdf", .,
                                       height = 11.7, width = 8.3)
 # residual check
-m_brm %>% 
-  add_predicted_draws(m_brm) %>%
+reg_data %>%
+  add_predicted_draws(m_logit_full) %>%
         summarise(p_residual = mean(.prediction < 1 - beta),
                   z_residual = qnorm(p_residual),
                   .groups = "drop_last") %>%
         ggplot(aes(sample = z_residual)) +
         geom_qq() +
         geom_abline()
+pp_check(m_logit_full, ndraws =  50)
 
 ```
 
 ```{r visualization}
-y_lim <- c(0.4,1)
+y_lim <- c(0.6,1)
 p1 <- reg_data %>%
-  ungroup() %>% 
+  group_by(region) %>% 
   data_grid(diss_NP = mean(diss_NP),
             mean_ndep = seq_range(mean_ndep, n = 20),
             mean_np = mean(mean_np),
@@ -474,20 +515,30 @@ p1 <- reg_data %>%
             diss_PET = mean(diss_PET),
             diss_ndep = mean(diss_ndep),
             diss_biomass = mean(diss_biomass),
-            diss_elev = mean(diss_elev), 
-            region = NA) %>%
-  add_epred_rvars(m_brm) %>% 
-  ggplot(aes(x = (exp(mean_ndep)/1000)/5)) +
-  stat_lineribbon(aes(ydist = 1 - .epred), .width = 0.95,
-                  alpha = 0.5) + #back transform to dissimilarity
+            diss_elev = mean(diss_elev)) %>%  
+              add_epred_rvars(m_logit_full,
+            allow_new_levels = T) %>% 
+  mutate(region = factor(region, levels = c("European Atlantic mixed forests",
+                                            "Alps conifer and mixed forests",
+                                            "Western European broadleaf forests",
+                                            "Pannonian mixed forests",
+                                            "Central European mixed forests",
+                                            "Kazakh steppe",
+                                            "East Siberian taiga"
+                                            ))) %>% 
+  ggplot(aes(x = (exp(mean_ndep)/1000)/5), col = region) +
+  stat_lineribbon(aes(ydist = 1 - .epred, col = region, fill = region), .width = 0.95,
+                  alpha = 0.5, linetype = "dashed", linewidth = 0.75) + #back transform to dissimilarity
   scale_x_continuous("Average annual N-deposition (kg/ha)", trans = "log",
                      breaks = c(1,2,5,10,20,60),
                      labels = c(1,2,5,10,20,60)) +
-  scale_y_continuous("Variation between communities", limits = y_lim) +
+  scale_y_continuous("Community dissimilarity", limits = y_lim) +
+  scale_fill_manual("",values = region_color, labels = region_label) +
+  scale_color_manual("",values = region_color, labels = region_label) +
   theme_bw() 
 p1
 p2 <- reg_data %>%
-  ungroup() %>% 
+  group_by(region) %>% 
   data_grid(diss_NP = mean(diss_NP),
             mean_ndep = mean(mean_ndep),
             mean_np = seq_range(mean_np, n = 20),
@@ -498,19 +549,27 @@ p2 <- reg_data %>%
             diss_PET = mean(diss_PET),
             diss_ndep = mean(diss_ndep),
             diss_biomass = mean(diss_biomass),
-            diss_elev = mean(diss_elev), 
-            region = NA) %>%
-  add_epred_rvars(m_brm) %>% 
-  ggplot(aes(x = exp(mean_np))) +
-  stat_lineribbon(aes(ydist = 1 - .epred), .width = 0.95,  alpha = 0.5, 
-                  fill = "grey", colour = "black") + #back transform to dissimilarity
+            diss_elev = mean(diss_elev)) %>%
+  add_epred_rvars(m_logit_full, allow_new_levels = T) %>% 
+   mutate(region = factor(region, levels = c("European Atlantic mixed forests",
+                                            "Alps conifer and mixed forests",
+                                            "Western European broadleaf forests",
+                                            "Pannonian mixed forests",
+                                            "Central European mixed forests",
+                                            "Kazakh steppe",
+                                            "East Siberian taiga"
+                                            ))) %>% 
+  ggplot(aes(x = exp(mean_np), col = region)) +
+  stat_lineribbon(aes(ydist = 1 - .epred, col = region, fill = region), .width = 0.95,  
+                  alpha = 0.5, linetype = "dashed", linewidth = 0.75) + #back transform to dissimilarity
   scale_x_continuous("N/P") +
-  scale_y_continuous("Variation between communities", limits = y_lim) +
-  theme_bw() +
-  theme(legend.position = "None")
-
+  scale_y_continuous("Community dissimilarity", limits = y_lim) +
+  scale_fill_manual("",values = region_color, labels = region_label) +
+  scale_color_manual("",values = region_color, labels = region_label) +
+  theme_bw()
+p2
 p3 <- reg_data %>%
-  ungroup() %>% 
+  group_by(region) %>% 
   data_grid(diss_NP = mean(diss_NP),
             mean_ndep = mean(mean_ndep),
             mean_np = mean(mean_np),
@@ -521,22 +580,135 @@ p3 <- reg_data %>%
             diss_PET = mean(diss_PET),
             diss_ndep = mean(diss_ndep),
             diss_biomass = mean(diss_biomass),
-            diss_elev = mean(diss_elev), 
-            region = NA) %>%
-  add_epred_rvars(m_brm) %>% 
-  ggplot(aes(x = exp(mean_biomass))) +
-  stat_lineribbon(aes(ydist = 1 - .epred), .width = 0.95,  alpha = 0.5, 
-                  fill = "grey", colour = "black") + #back transform to dissimilarity
+            diss_elev = mean(diss_elev)) %>%
+  add_epred_rvars(m_logit_full, allow_new_levels = T) %>% 
+   mutate(region = factor(region, levels = c("European Atlantic mixed forests",
+                                            "Alps conifer and mixed forests",
+                                            "Western European broadleaf forests",
+                                            "Pannonian mixed forests",
+                                            "Central European mixed forests",
+                                            "Kazakh steppe",
+                                            "East Siberian taiga"
+                                            ))) %>% 
+  ggplot(aes(x = exp(mean_biomass), col = region)) +
+  stat_lineribbon(aes(ydist = 1 - .epred, col = region, fill = region),  .width = 0.95,
+                  alpha = 0.5,linetype = "dashed",linewidth = 0.75) + #back transform to dissimilarity
   scale_x_continuous("Biomass (g/m2)") +
-  scale_y_continuous("Variation between communities", limits = y_lim) +
-  theme_bw() +
-  theme(legend.position = "None")
+  scale_y_continuous("Community dissimilarity", limits = y_lim) +
+  scale_fill_manual("",values = region_color, labels = region_label) +
+  scale_color_manual("",values = region_color, labels = region_label) +
+  theme_bw() 
+p3
 ```
 
 ```{r model_output}
-all_param <- parameters(m_brm, effects = "all", component = "all", verbose = "all")
-all_param
-plot(all_param)
+all_param <- model_parameters(m_logit_full)
+all_param <- all_param %>% 
+  mutate(across(where(is.numeric), ~round(., digits = 4))) %>% 
+  # swap the signs because of 1-beta
+  mutate(across(c(Median,CI_low,CI_high), ~.*-1)) %>% 
+  # filter(!Parameter %in% c("b_Intercept", "phi") %>% 
+  mutate(ok = case_when(str_detect(Parameter, "region") ~ "Region",
+                        str_detect(Parameter, "dis" ) ~ "Dissimilarity",
+                        str_detect(Parameter, "mean") ~ "Mean"),
+    Parameter = case_match(Parameter,
+                           "b_Intercept" ~ "Intercept",
+                           "b_zi_Intercept" ~ "Intercept",
+                           "phi" ~ "Phi",
+                "b_diss_NP" ~ "Distance N/P",
+                "b_mean_ndep" ~ "Mean N-deposition",
+                "b_mean_np" ~ "Mean N/P",
+                "b_mean_biomass" ~ "Mean biomass",
+                "b_distance" ~ "Geographical distance",
+                "b_diss_elev" ~ "Elevation",
+                "b_diss_MAT" ~  "Distance MAP",
+                "b_diss_MAP" ~ "Distance MAT",
+                "b_diss_PET" ~ "Distance PET",
+                "b_diss_ndep" ~ "Distance N-deposition",
+                "b_diss_biomass" ~ "Distance biomass",
+                "b_regionCentralEuropeanmixedforests" ~ "Northeastern Europe",
+                "b_regionEastSiberiantaiga" ~ "Yakutsk",
+                "b_regionEuropeanAtlanticmixedforests" ~ "Western Europe",
+                "b_regionKazakhsteppe" ~ "Kazakhstan",
+                "b_regionPannonianmixedforests" ~ "Eastern Europe",
+                "b_regionWesternEuropeanbroadleafforests" ~ "Central Europe",
+                "b_zi_diss_NP" ~ "Distance N/P",
+                # "b_zi_mean_ndep" ~ "Mean N-deposition",
+                # "b_zi_mean_np" ~ "Mean N:P",
+                # "b_zi_mean_biomass" ~ "Mean biomass",
+                "b_zi_distance" ~ "Geographical distance",
+                "b_zi_diss_elev"~"Elevation", 
+                "b_zi_diss_MAT" ~ "Distance MAP",
+                "b_zi_diss_MAP" ~ "Distance MAT",
+                "b_zi_diss_PET" ~ "Distance PET",
+                "b_zi_diss_ndep" ~ "Distance N-deposition",
+                "b_zi_diss_biomass" ~ "Distance biomass",
+                "b_zi_regionCentralEuropeanmixedforests" ~ "Northeastern Europe",
+                "b_zi_regionEastSiberiantaiga" ~ "Yakutsk",
+                "b_zi_regionEuropeanAtlanticmixedforests" ~ "Western Europe",
+                "b_zi_regionKazakhsteppe" ~ "Kazakhstan",
+                "b_zi_regionPannonianmixedforests" ~ "Eastern Europe",
+                "b_zi_regionWesternEuropeanbroadleafforests" ~ "Central Europe")) 
+kable(all_param)
+
+p4 <- all_param %>% 
+  filter(Component == "conditional") %>% 
+  # filter(!Parameter == "Intercept") %>% 
+  filter(ok == "Dissimilarity") %>% 
+  mutate(Parameter = factor(Parameter, levels = c("Geographical distance", "Elevation",
+                                                  "Distance MAT", "Distance MAP", "Distance PET",
+                                                  "Distance N-deposition","Distance N/P", 
+                                                  "Distance biomass"))) %>% 
+  ggplot(aes(y = Parameter, x = Median)) +
+   geom_point() +
+  geom_errorbar(aes(xmin = CI_low, xmax = CI_high)) +
+  geom_vline(aes(xintercept = 0)) +
+  scale_x_continuous("Effect on community dissimilarity") +
+  scale_y_discrete("") + 
+  theme_bw()
+p_all <- p1 + free(p2) + p3 + p4 +
+  plot_layout(guides = 'collect') +  plot_annotation(tag_levels = 'a') &
+  theme(legend.position = "bottom", text = element_text(size = 10))
+
+ggsave("figures/Files_Ton/fig4_beta_div.pdf", p_all, dpi = 300, width = 7, height = 7)
+ggsave("figures/fig4_beta_div.png", p_all, dpi = 300, width = 7, height = 7)
+```
+
+```{r}
+var_labels2 <- c(MAT = "MAT (°C)",
+                 PET = "PET (mm/yr)",
+                 MAP = "MAP (mm/yr)",
+                 elev = "Elevation (m.a.s.l)",
+                 biomass = "Biomass (g/m2)",
+                 ndep = "N-deposition (kg/ha/yr)",
+                 NP = "N/P" )
+# environmental variable - boxplot by region
+g <- env_data %>% 
+  filter(region %in% region_alias$region) %>% 
+  dplyr::select(-cell_lat,-cell_lon,-count) %>% 
+  mutate(across(c("MAP" , "NP","biomass","ndep"), ~exp(.))) %>%
+  mutate(ndep = ndep/1000/5) %>% 
+  pivot_longer(cols = MAT:elev, names_to = "var", values_to = "value") %>% 
+  mutate(var = factor(var, levels = c("MAT","MAP","PET", "ndep", "NP", "biomass", "elev"))) %>% 
+  mutate(region = factor(region, levels = c("European Atlantic mixed forests",
+                                            "Alps conifer and mixed forests",
+                                            "Western European broadleaf forests",
+                                            "Pannonian mixed forests",
+                                            "Central European mixed forests",
+                                            "Kazakh steppe",
+                                            "East Siberian taiga"
+                                            ))) %>% 
+  ggplot(aes(x = region, y = value, fill = region)) +
+  geom_boxplot() +
+  facet_wrap(~var, scales = "free_y", labeller = as_labeller(var_labels2), ncol = 2) +
+  scale_fill_manual(values = region_color, labels = region_label) +
+  scale_x_discrete("", labels = region_label) +
+  scale_y_continuous("") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        legend.position = "none")
+ggsave("figures/Sup_env_var_region.png", g, width = 7, height = 7)
+ggsave("figures/Files_Ton/Sup_env_var_region.pdf", g, width = 7, height = 7)
 
 ```
 
