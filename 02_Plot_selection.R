@@ -44,8 +44,8 @@ npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>%
   # add column with nutrient limitation
   mutate(lim = case_when(NP <= 13.5 & NK <= 2.1 ~ "N-limitation", 
                          NP > 16 & KP > 3.4 ~ "P-limitation", 
-                         NK > 2.1 & KP < 3.4 ~  "K(co)-limitation", 
-                         NP >= 13.5 & NP < 16 ~ "Co-limitation N-P",
+                         NK > 2.1 & KP <= 3.4 ~  "K(co)-limitation", 
+                         NP >= 13.5 & NP <= 16 ~ "Co-limitation N-P",
                          TRUE ~ "No limitation by N, P, K"))
 
 meta <- read.csv(paste0(data_dir, "GlobNut1.0_metadata.csv"))
@@ -79,7 +79,7 @@ globnut <- globnut_raw %>%
   # keep only plots with complete data
   drop_na(-plot_size, -sample_year,-elev,-MAT,-MAP,-PET) %>% 
   # filter K-limited and no limitation plots
-  filter(!lim %in% c("K(co)-limitation", "No limitation N, P, K")) %>% 
+  filter(!lim %in% c("K(co)-limitation", "No limitation by N, P, K")) %>% 
   # filter out outliers with high biomass (potential filter)
   mutate(z_biomass = (biomass - mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
