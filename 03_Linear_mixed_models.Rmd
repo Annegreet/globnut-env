@@ -21,12 +21,10 @@ if (!require(tidyverse)) install.packages("tidyverse")
 if (!require(vegan)) install.packages("vegan")
 if (!require(easystats)) install.packages("easystats")
 if (!require(knitr)) install.packages("knitr")
-if (!require(scales)) install.packages("scales")
-if (!require(gridExtra)) install.packages("gridExtra")
+if (!require(patchwork)) install.packages("patchwork")
 if (!require(MuMIn)) install.packages("MuMIn")
-if (!require(cowplot)) install.packages("cowplot")
-if (!require(GGally)) install.packages("GGally")
 if (!require(nlme)) install.packages("nlme")
+if (!require(ggnewscale)) install.packages("ggnewscale")
 
 ## Load data
 globnut <- readRDS(params$data) %>% ungroup() %>% 
@@ -53,74 +51,25 @@ globnut <- readRDS(params$data) %>% ungroup() %>%
 fm <- "MAT_cent + I(MAT_cent^2) + MAP_cent + I(MAP_cent^2) + PET_cent + I(PET_cent^2) +
 ndep_cent + I(ndep_cent^2)  + NP_cent + I(NP_cent^2)"
 
-# Define subset criteria for model selection: quadratic terms can only be included if linear terms are included as well
-sb <- expression(MAT_cent & MAP_cent & PET_cent & NP_cent & ndep_cent)
-
-colours <- brewer_pal(palette = "GnBu")(5) %>% rev()
 colours_lim <- c('#1b9e77','#d95f02','#7570b3')
-names(colours) <- c("clim", "geo", "ndep", "random", "lim")
-
-region_color <- c(jak = '#a65628',
-                  north_eu = '#377eb8',
-                  kaz = '#4daf4a',
-                  west_eu = '#984ea3',
-                  central_eu = '#ff7f00',
-                  east_eu = '#e41a1c',
-                  alps = '#f781bf')
-region_label2 <- c(jak = "Yakutsk",
-                   north_eu = "Northeastern Europe",
-                   kaz = "Kazakhstan",
-                   west_eu =  "Western Europe",
-                   central_eu = "Central Europe",
-                   east_eu = "Eastern Europe",
-                   alps = "Alps")
-
-region_alias <- data.frame(ecoregion = c("Alps conifer and mixed forests",
-                                      "Central European mixed forests",
-                                      "East Siberian taiga","European Atlantic mixed forests",
-                                      "Kazakh steppe","Pannonian mixed forests",
-                                      "Western European broadleaf forests"),
-                           region = c("alps", "north_eu", "jak", "west_eu", "kaz", 
-                                     "east_eu", "central_eu"),
-                           label = c("Alps", "Northeastern Europe", "Yakutsk", 
-                                     "Western Europe",
-                                     "Kazakhstan", "Eastern Europe", "Central Europe"))
-
-## Extract ecoregions for globnut
-ecoreg_globnut <- readRDS("outputs/Ecoregions.rds")
-
-# add to globnut
-globnut <- globnut %>% 
-  left_join(ecoreg_globnut[,c("plot_ID", "Ecoreg.ECO_NAME")], by = "plot_ID") %>% 
-  rename(ecoregion = Ecoreg.ECO_NAME) %>% 
-  left_join(region_alias, by = "ecoregion")
-```
-
-## Correlation between ndep and N & P concentration
-```{r eval=FALSE, include=FALSE}
-cor_data <- globnut %>% 
-  dplyr::select(ndep, P, N) %>% 
-  mutate(across(P:N, ~log(.)))
-ggpairs(cor_data, columnLabels = (c("N-deposition","[N]","[P]"))) +
-  theme_bw()
-ggsave("figures/Correlation_plot.png",height = 7,width = 7)  
-
+np_val <- log(c(5,15,20)) - mean(globnut$NP) # NP values to predict on 
+count_limits <- c(0,50) # color scale density annotation plot counts
+stand_plot <- 10 # plot size to adjust prediction to
+cdl_cent <- log(75000) - mean(globnut$ndep) # CDL to plot as annotation
 ```
 
 ## Biomass
-
 ```{r fig.height=8, fig.width=7, include=FALSE}
 full_model_biomass <- lme(formula(paste("biomass ~", fm)), random = ~1|cell,
                            data = globnut, 
                            na.action = "na.fail")
-plot(full_model_biomass)
-check_heteroscedasticity(full_model_biomass)
-check_outliers(full_model_biomass)
+check_heteroscedasticity(full_model_biomass) %>% plot
+check_outliers(full_model_biomass) 
 check_collinearity(full_model_biomass)
 
-summary(full_model_biomass)
-
 # Generate all possible model combinations
+# Define subset criteria for model selection: quadratic terms can only be included if linear terms are included as well
+sb <- expression(MAT_cent & MAP_cent & PET_cent & NP_cent & ndep_cent)
 model_combinations <- dredge(full_model_biomass, subset = sb)
 
 # get top model
@@ -128,136 +77,51 @@ fm_biomass <- formula(get.models(model_combinations, subset = 1)[[1]])
 
 best_model_biomass <- lme(fm_biomass, random = ~1|cell, data = globnut)
 
-plot(best_model_biomass)
+check_heteroscedasticity(full_model_biomass) %>% plot
 check_outliers(best_model_biomass)
 check_collinearity(best_model_biomass)
-
-# apply model per region, get prediction
-biomass_regions_ndep <- globnut %>% 
-  filter(!is.na(region)) %>% 
-  group_by(region) %>% 
-  nest() %>% 
-  mutate(mod = purrr::map(data, ~lme(fm_biomass, random = ~1|cell, data = .)),
-         sig = purrr::map(mod, ~ifelse(anova(.)["ndep_cent","p-value"] <=
-                                         0.05,"significant","not-significant")) %>%
-           unlist,
-         n_obs = purrr::map(mod, ~nobs(.)),
-         pred = purrr::map(mod, ~ggeffects::ggpredict(.,
-                                 terms = c("ndep_cent [all]")))) %>% 
-  dplyr::select(region, pred, sig, n_obs) %>% 
-  unnest(pred)
-
-# apply model per region, get prediction
-biomass_regions_np <- globnut %>% 
-  filter(!is.na(region)) %>% 
-  group_by(region) %>% 
-  nest() %>% 
-  mutate(mod = purrr::map(data, ~lme(fm_biomass,random = ~1|cell, data = .)), 
-         sig = purrr::map(mod, ~ifelse(anova(.)["NP_cent","p-value"] <=
-                                         0.05,"significant","not-significant")) %>%
-           unlist,
-         pred = purrr::map(mod, ~ggeffects::ggpredict(.,
-                                 terms = c("NP_cent [all]")))) %>% 
-  dplyr::select(region, pred,sig) %>% 
-  unnest(pred)
-
-# biomass_ecoregions_ndep <- globnut %>% 
-#   mutate(ecoregion2 = ecoregion) %>% # hacky to retain ecoregion column in nested data
-#   group_by(ecoregion2) %>% 
-#   mutate(n = n()) %>% 
-#   filter(n >= 100) %>% 
-#   nest() %>% 
-#   mutate(
-#           mod = purrr::map(data, ~lme(fm_biomass, random = ~1|ecoregion/cell, data = .)),
-#          sig = purrr::map(mod, ~ifelse(anova(.)["ndep_cent","p-value"] <=
-#                                          0.05,"significant","not-significant")) %>%
-#            unlist,
-#          n_obs = purrr::map(mod, ~nobs(.)),
-#          pred = purrr::map(mod, ~ggeffects::ggpredict(.,
-#                                  terms = c("ndep_cent [all]")))) %>% 
-#   dplyr::select(ecoregion = ecoregion2, pred, sig, n_obs) %>% 
-#   unnest(pred)
-
 ```
 
 ```{r}
-# plot terms
-biomass_limits <- c(0, 1500) 
-cdl <- ggeffects::ggpredict(best_model_biomass, terms = c("ndep_cent [0.57]")) %>% 
+# plot annotation
+biomass_limits <- c(0, 700) 
+# biomass at critical deposition of 15 kg/ha/y (*5)
+cdl <- ggeffects::ggpredict(best_model_biomass, terms = c("ndep_cent [cdl_cent]",
+                                                          "NP_cent [np_val]")) %>% 
   mutate(x = (exp(x + mean(globnut$ndep))/1000)/5, predicted = exp(predicted)) %>% drop_na()
 vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
 horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, 
                    yend = cdl$predicted, group = cdl$group)  
 
 # nutrients
-(biomass_ndep <- ggeffects::ggpredict(best_model_biomass,
-                                 terms = c("ndep_cent [all]")) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = exp(predicted))) +
-        geom_hex(data = globnut, aes(x = exp(ndep)/1000/5, y = exp(biomass))) +
-    scale_fill_gradient("Count",low = "#deebf7", high = "#3182bd") +
-      geom_ribbon(aes(ymin = exp(conf.low), ymax = exp(conf.high)), alpha = .5) +
-      geom_line(linewidth = 1) +
+biomass_ndep_np <- 
+  ggeffects::ggpredict(best_model_biomass,
+                                 terms = c("ndep_cent [all]", "NP_cent [np_val]")) %>% 
+  as.data.frame() %>% 
+  mutate(group = exp(as.numeric(as.character(group)) + 
+                         mean(globnut$NP)) %>% as.factor()) 
+biomass_ndep_np <- ggplot(data = globnut, aes(x = exp(ndep)/1000/5, y = exp(biomass))) +
+    geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = biomass_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = exp(predicted), 
+             fill = group, col = group, ymin = exp(conf.low), 
+             ymax = exp(conf.high)), alpha = .5, col = NA) +
+    geom_line(data = biomass_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = exp(predicted), col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
+    scale_y_continuous(Biomass~(g~m^-2), limits = biomass_limits) +
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
+                     breaks = c(1,2,5,10,20,60),
+                     labels = c(1,2,5,10,20,60)) +
     geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),
-                 linetype = "dashed") +
-    geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),
-                 linetype = "dashed") + 
-    scale_y_continuous(Biomass~(g/m^2), limits = biomass_limits) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
-                     breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-  theme_bw() )
-
-(biomass_ndep2 <- biomass_regions_ndep %>% 
-      mutate(region = factor(region, levels = c("west_eu","alps", "central_eu", "east_eu", 
-                                            "north_eu", "kaz", "jak"))) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = exp(predicted), 
-               color = region, fill = region)) +
-      geom_ribbon(aes(ymin = exp(conf.low), ymax = exp(conf.high), alpha = sig) , 
-                  color = NA) +
-      geom_line(aes(linetype = sig)) +
-    scale_y_continuous(Biomass~(g/m^2), limits = biomass_limits) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
-                     breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-     scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-  scale_linetype_manual(values = c("significant" = "solid", 
-                                   "not-significant" = "dashed")) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
-
-biomass_np_pred <- ggeffects::ggpredict(best_model_biomass,
-                                 terms = c("NP_cent [all]"))
-
-(biomass_np <- ggplot() +
-   geom_hex(data = globnut, aes(x = exp(NP), y = exp(biomass))) +
-  scale_fill_gradient("Count",low = "#deebf7", high = "#3182bd") +
-      geom_ribbon(data = biomass_np_pred, 
-                  aes(x = exp(x + mean(globnut$NP)), ymin = exp(conf.low), 
-                      ymax = exp(conf.high)), alpha = .5) +
-      geom_line(data = biomass_np_pred, aes(x = exp(x + mean(globnut$NP)), 
-                                       y = exp(predicted)), linewidth = 1) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
-    scale_y_continuous(Biomass~(g/m^2), limits = biomass_limits) +
-    theme_bw() )
-(biomass_np2 <- biomass_regions_np %>% 
-          mutate(region = factor(region, levels = c("west_eu","alps","central_eu", "east_eu", 
-                                            "north_eu", "kaz", "jak"))) %>% 
-    ggplot(aes(x = exp(x + mean(globnut$NP)), y = exp(predicted), color = region, 
-               fill = region)) +
-      geom_ribbon(aes(ymin = exp(conf.low), ymax = exp(conf.high), alpha = sig), color = NA) +
-      geom_line(aes(linetype = sig)) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
-    scale_y_continuous(Biomass~(g/m^2), limits = biomass_limits) +
-     scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-  scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
+                                linewidth = 0.5,
+               linetype = "dashed") + 
+  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),
+                              linewidth = 0.5, linetype = "dashed") +
+  theme_bw() 
 
 ```
 
@@ -270,7 +134,7 @@ full_model_richness <- lme(formula(paste("log(spec_ric) ~",
                                           fm)), random =  ~1|cell,
                            data = globnut,
                            na.action = "na.fail")
-check_heteroscedasticity(full_model_richness)
+check_heteroscedasticity(full_model_richness) %>% plot
 check_collinearity(full_model_richness)
 check_outliers(full_model_richness)
 
@@ -286,198 +150,79 @@ best_model_richness <- lme(fm_richness,
                           random =  ~1|cell,
                            data = globnut,
                            na.action = "na.fail")
-check_heteroscedasticity(best_model_richness)
+check_heteroscedasticity(best_model_richness) %>% plot
 check_collinearity(best_model_richness)
 check_outliers(best_model_richness)
-
-# plot_size position in formula
-var_position <- grep("plot_size" , attr(terms(fm_richness), "term.labels"))
-# apply model per region, get prediction
-richness_regions_ndep <- globnut %>%
-  filter(!is.na(region)) %>%
-  group_by(region) %>%
-  nest() %>%
-  mutate(
-    mod = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        fm_richness <- update(fm_richness,
-                              drop.terms(terms(fm_richness),
-                                         var_position,
-                                         keep.response = TRUE))
-        lme(fm_richness, random = ~ 1 | cell, data = df)
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_richness, random = ~ 1 | cell, data = df)
-      }
-    }),
-    # test for significance
-    sig = purrr::map(mod, ~ ifelse(
-      anova(.)["ndep_cent", "p-value"] <=
-        0.05, "significant", "not-significant"
-    )) %>%
-      unlist,
-    # prediction
-    pred = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        lme(update(
-          fm_richness,
-          drop.terms(terms(fm_richness),
-                     var_position,
-                     keep.response = TRUE)
-        ),
-        random = ~ 1 |
-          cell,
-        data = df) %>% ggeffects::ggpredict(., terms = "ndep_cent")
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_richness, random = ~ 1 |
-              cell, data = df) %>% ggeffects::ggpredict(., terms = "ndep_cent")
-      }
-    })
-  ) %>%
-  dplyr::select(region, pred, sig) %>%
-  unnest(pred)
-
-# apply model per region, get prediction
-richness_regions_np <- globnut %>%
-  filter(!is.na(region)) %>%
-  group_by(region) %>%
-  nest() %>%
-  mutate(
-    mod = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        fm_richness <- update(fm_richness,
-                              drop.terms(terms(fm_richness),
-                                         var_position,
-                                         keep.response = TRUE))
-        lme(fm_richness, random = ~ 1 | cell, data = df)
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_richness, random = ~ 1 | cell, data = df)
-      }
-    }),
-    # test for significance
-    sig = purrr::map(mod, ~ ifelse(
-      anova(.)["NP_cent", "p-value"] <=
-        0.05, "significant", "not-significant"
-    )) %>%
-      unlist,
-    # prediction
-    pred = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        lme(update(
-          fm_richness,
-          drop.terms(terms(fm_richness),
-                     var_position,
-                     keep.response = TRUE)
-        ),
-        random = ~ 1 |
-          cell,
-        data = df) %>% ggeffects::ggpredict(., terms = "NP_cent")
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_richness, random = ~ 1 |
-              cell, data = df) %>% ggeffects::ggpredict(., terms = "NP_cent")
-      }
-    })
-  ) %>%
-  dplyr::select(region, pred, sig) %>%
-  unnest(pred)
-
 ```
 
 ```{r}
 # plot terms
-richness_limits <- c(0, 80)
-richness_limits2 <- c(0, 80)
+richness_limits <- c(0, 50)
+
 # species richness at critical deposition of 15 kg/ha/y (*5)
-cdl_cent <- log(75000) - mean(globnut$ndep) # log and center
-cdl <- ggeffects::ggpredict(best_model_richness, terms = c("ndep_cent [0.57]")) %>% 
+cdl <- ggeffects::ggpredict(best_model_richness, terms = c("ndep_cent [cdl_cent]",
+                                                           "NP_cent [np_val]",
+                                                           "plot_size [stand_plot]")) %>% 
   mutate(x = (exp(x + mean(globnut$ndep))/1000)/5) %>% drop_na()
 vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
 horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
 
 # n-deposition
-(richness_ndep <- ggeffects::ggpredict(best_model_richness, 
-                                       terms = c("ndep_cent [all]")) %>% 
-  ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = predicted)) +
-    geom_hex(data = globnut, aes(x = exp(ndep)/1000/5, y = spec_ric)) +
-    scale_fill_gradient("Count",low = "#e5f5e0", high = "#31a354", limits = c(0,50)) +
-    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
-    geom_line(linewidth = 1) +
+richness_ndep_np <- 
+  ggeffects::ggpredict(best_model_richness,
+                                 terms = c("ndep_cent [all]", "NP_cent [np_val]",
+                                           "plot_size [stand_plot]")) %>% 
+  as.data.frame() %>% 
+    mutate(group = exp(as.numeric(as.character(group)) + 
+                         mean(globnut$NP)) %>% as.factor()) 
+
+richness_ndep_np <- ggplot(data = globnut, aes(x = exp(ndep)/1000/5, y = spec_ric)) +
+    geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = richness_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = predicted, 
+             fill = group, ymin = conf.low, 
+             ymax = conf.high), col = NA, alpha = .5) +
+    geom_line(data = richness_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = predicted, col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
     scale_y_continuous("Species richness (q0)", limits = richness_limits) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
                      breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
+                     labels = c(1,2,5,10,20,60)) + 
   geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),
+                              linewidth = 0.5,
                linetype = "dashed") + 
   geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),
-               
-               linetype = "dashed") + 
-  theme_bw())
-(richness_ndep2 <-  richness_regions_ndep %>% 
-              mutate(region = factor(region, levels = c("west_eu","alps","central_eu",
-                                                        "east_eu",  "north_eu",
-                                                        "kaz", "jak"))) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = predicted, 
-               color = region, fill = region )) +
-      geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
-      geom_line(aes(linetype = sig)) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-    scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
-    scale_y_continuous("Species richness (q0)", limits = richness_limits2,
-                       oob = scales::rescale_none) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
-                     breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-  theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
+                              linewidth = 0.5,
+               linetype = "dashed") +
+  theme_bw()
 
-richness_np_pred <- ggeffects::ggpredict(best_model_richness,
-                                 terms = c("NP_cent [all]"))
-
-(richness_np <- ggplot() +
-    geom_hex(data = globnut, aes(x = exp(NP), y = spec_ric)) +
- scale_fill_gradient("Count",low = "#e5f5e0", high = "#31a354", limits = c(0,50)) +
-      geom_ribbon(data = richness_np_pred, 
-                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, 
-                      ymax = conf.high), alpha = .5) +
-      geom_line(data = richness_np_pred, aes(x = exp(x + mean(globnut$NP)), 
-                                       y = predicted), linewidth = 1) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
+richness_np_biomass <- ggeffects::ggpredict(best_model_richness, 
+                                          terms = c("biomass_cent [all]", 
+                                                    "NP_cent [np_val]", 
+                                                    "plot_size [stand_plot]"))  %>%
+    as.data.frame() %>% 
+    mutate(group = exp(as.numeric(as.character(group)) + mean(globnut$NP)) %>%
+             as.factor())
+richness_np_biomass <-           
+   ggplot(data = globnut, aes(x = exp(biomass), y = spec_ric)) +
+    geom_hex() +
+       scale_fill_gradient("Count", low = "grey90", high = "grey40",  limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = richness_np_biomass, aes(x = exp(x + mean(globnut$biomass)), 
+                                     y = predicted, 
+             fill = group,  ymin = conf.low, 
+             ymax = conf.high), col = NA, alpha = .5) +
+    geom_line(data = richness_np_biomass, aes(x = exp(x + mean(globnut$biomass)), 
+                                     y = predicted, col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
     scale_y_continuous("Species richness (q0)", limits = richness_limits) +
-    theme_bw())
-(richness_np2 <- richness_regions_np %>% 
-          mutate(region = factor(region, levels = c("west_eu","alps","central_eu",
-                                                    "east_eu", 
-                                            "north_eu", "kaz", "jak"))) %>% 
-    ggplot(aes(x = exp(x + mean(globnut$NP)), y = predicted, color = region, 
-               fill = region)) +
-      geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
-      geom_line(aes(linetype = sig)) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
-    scale_y_continuous("Species richness (q0)", 
-                       limits = richness_limits2, oob = scales::rescale_none) +
-    scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-    scale_linetype_manual(values = c("significant" = "solid", 
-                                     "not-significant" = "dashed")) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
-
+    scale_x_log10(Biomass~(g~m^-2)) +
+  theme_bw()
 ```
 
 ## Species diversity (q1)
@@ -505,197 +250,87 @@ check_heteroscedasticity(best_model_q1)
 check_outliers(best_model_q1)
 check_collinearity(best_model_q1)
 
-# apply model per region, get prediction
-# plot_size position in formula
-var_position <- grep("plot_size" , attr(terms(fm_q1), "term.labels"))
-q1_regions_ndep <- globnut %>%
-  filter(!is.na(region)) %>%
-  group_by(region) %>%
-  nest() %>%
-  mutate(
-    mod = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        fm_q1 <- update(fm_q1,
-                              drop.terms(terms(fm_q1),
-                                         var_position,
-                                         keep.response = TRUE))
-        lme(fm_q1, random = ~ 1 | cell, data = df)
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q1, random = ~ 1 | cell, data = df)
-      }
-    }),
-    # test for significance
-    sig = purrr::map(mod, ~ ifelse(
-      anova(.)["ndep_cent", "p-value"] <=
-        0.05, "significant", "not-significant"
-    )) %>%
-      unlist,
-    # prediction
-    pred = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        lme(update(
-          fm_q1,
-          drop.terms(terms(fm_q1),
-                     var_position,
-                     keep.response = TRUE)
-        ),
-        random = ~ 1 |
-          cell,
-        data = df) %>% ggeffects::ggpredict(., terms = "ndep_cent")
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q1, random = ~ 1 |
-              cell, data = df) %>% ggeffects::ggpredict(., terms = "ndep_cent")
-      }
-    })
-  ) %>%
-  dplyr::select(region, pred, sig) %>%
-  unnest(pred)
-
-# apply model per region, get prediction
-q1_regions_np <- globnut %>%
-  filter(!is.na(region)) %>%
-  group_by(region) %>%
-  nest() %>%
-  mutate(
-    mod = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        fm_q1 <- update(fm_q1,
-                              drop.terms(terms(fm_q1),
-                                         var_position,
-                                         keep.response = TRUE))
-        lme(fm_q1, random = ~ 1 | cell, data = df)
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q1, random = ~ 1 | cell, data = df)
-      }
-    }),
-    # test for significance
-    sig = purrr::map(mod, ~ ifelse(
-      anova(.)["NP_cent", "p-value"] <=
-        0.05, "significant", "not-significant"
-    )) %>%
-      unlist,
-    # prediction
-    pred = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        lme(update(
-          fm_q1,
-          drop.terms(terms(fm_q1),
-                     var_position,
-                     keep.response = TRUE)
-        ),
-        random = ~ 1 |
-          cell,
-        data = df) %>% ggeffects::ggpredict(., terms = "NP_cent")
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q1, random = ~ 1 |
-              cell, data = df) %>% ggeffects::ggpredict(., terms = "NP_cent")
-      }
-    })
-  ) %>%
-  dplyr::select(region, pred, sig) %>%
-  unnest(pred)
 ```
 
 ```{r}
 # plot terms
-q1_limits <- c(0, 40)
-q1_limits2 <- c(0, 40)
-
-cdl <- ggeffects::ggpredict(best_model_q1, terms = c("ndep_cent [0.57]")) %>% 
+q1_limits <- c(0, 15)
+cdl <- ggeffects::ggpredict(best_model_q1, terms = c("ndep_cent [0.57]",
+                                                     "NP_cent [np_val]",
+                                                      "plot_size [stand_plot]")) %>% 
   mutate(x = (exp(x + mean(globnut$ndep))/1000)/5) %>% drop_na()
 vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
 horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
 
 # nutrients
-(q1_ndep <- ggeffects::ggpredict(best_model_q1,
-                                 terms = c("ndep_cent [all]")) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = predicted)) +
-        geom_hex(data = globnut, aes(x = exp(ndep)/1000/5, y = q1)) +
-    scale_fill_gradient("Count",low = "#e5f5e0", high = "#31a354", limits = c(0,50)) +
-    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
-      geom_line(linewidth = 1) +
-     geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend), linetype = "dashed") + 
-   geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend), linetype = "dashed") + 
+q1_ndep_np <- 
+  ggeffects::ggpredict(best_model_q1,
+                                 terms = c("ndep_cent [all]", "NP_cent [np_val]",
+                                           "plot_size [stand_plot]")) %>% 
+  as.data.frame() %>% 
+    mutate(group = exp(as.numeric(as.character(group)) + 
+                         mean(globnut$NP)) %>% as.factor()) 
+q1_ndep_np <- 
+ggplot(data = globnut, aes(x = exp(ndep)/1000/5, y = q1)) +
+    geom_hex() +
+    scale_fill_gradient("Count", low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = q1_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = predicted, 
+             fill = group,  ymin = conf.low, 
+             ymax = conf.high), col = NA, alpha = .5) +
+    geom_line(data = q1_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = predicted, col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
     scale_y_continuous("ENS (q1)", limits = q1_limits) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
                      breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-  theme_bw())
-(q1_ndep2 <-  q1_regions_ndep %>% 
-              mutate(region = factor(region, levels = c("west_eu","alps","central_eu",
-                                                        "east_eu", "north_eu", "kaz",
-                                                        "jak"))) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = 
-                 predicted, color = region, 
-               fill = region )) +
-      geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
-    geom_line(aes(linetype = sig)) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-    scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
-    scale_y_continuous("ENS (q1)", limits = q1_limits2, oob = scales::rescale_none) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
-                     breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-  theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
+                     labels = c(1,2,5,10,20,60)) + 
+  geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),
+                              linewidth = 0.5,
+               linetype = "dashed") + 
+  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),
+                              linewidth = 0.5,
+               linetype = "dashed") +
+  theme_bw()
 
-q1_np_pred <- ggeffects::ggpredict(best_model_q1,
-                                 terms = c("NP_cent [all]"))
-
-(q1_np <- ggplot() +
-     geom_hex(data = globnut, aes(x = exp(NP), y = q1)) +
-     scale_fill_gradient("Count",low = "#e5f5e0", high = "#31a354", limits = c(0,50)) +
-      geom_ribbon(data = q1_np_pred, 
-                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, 
-                      ymax = conf.high), alpha = .5) +
-      geom_line(data = q1_np_pred, aes(x = exp(x + mean(globnut$NP)), 
-                                       y = predicted), linewidth = 1) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
+q1_np_biomass <- ggeffects::ggpredict(best_model_q1, 
+                                          terms = c("biomass_cent [all]", 
+                                                    "NP_cent [np_val]", 
+                                                    "plot_size [stand_plot]"))  %>%
+    as.data.frame() %>% 
+    mutate(group = exp(as.numeric(as.character(group)) + mean(globnut$NP)) %>%
+             as.factor())
+q1_np_biomass <-            
+   ggplot(data = globnut, aes(x = exp(biomass), y = q1)) +
+    geom_hex() +
+       scale_fill_gradient("Count", low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = q1_np_biomass, aes(x = exp(x + mean(globnut$biomass)), 
+                                     y = predicted, 
+             fill = group, col = group, ymin = conf.low, 
+             ymax = conf.high), col = NA, alpha = .5) +
+    geom_line(data = q1_np_biomass, aes(x = exp(x + mean(globnut$biomass)), 
+                                     y = predicted, col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
     scale_y_continuous("ENS (q1)", limits = q1_limits) +
-    theme_bw() )
-(q1_np2 <- q1_regions_np %>% 
-              mutate(region = factor(region, levels = c("west_eu","alps","central_eu",
-                                                        "east_eu", 
-                                            "north_eu", "kaz", "jak"))) %>% 
-    ggplot(aes(x = exp(x + mean(globnut$NP)), y = predicted, color = region, fill = region)) +
-      geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
-      geom_line(aes(linetype = sig)) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
-  scale_y_continuous("ENS (q1)", limits = q1_limits2, oob = scales::rescale_none) +
-     scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-    scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
+    scale_x_log10(Biomass~(g~m^-2)) +
+  theme_bw()
 
 ```
 
 ## Species diversity (q2)
 
 ```{r echo=FALSE, fig.height=8, fig.width=7}
-full_model_q2 <- lme(formula(paste("log(q2) ~", fm, "+ biomass_cent + I(biomass^2) + log(plot_size)")),
+full_model_q2 <- lme(formula(paste("log(q2) ~", fm, "+ biomass_cent + I(biomass_cent^2) +
+                                   log(plot_size)")),
                      random = ~1|cell,
                       data = globnut, 
                            na.action = "na.fail")
 
-check_heteroscedasticity(full_model_q2)
+check_heteroscedasticity(full_model_q2) %>% plot
 check_outliers(full_model_q2)
 check_collinearity(full_model_q2)
 
@@ -705,231 +340,102 @@ model_combinations_q2 <- dredge(full_model_q2, subset = sb)
 # get top model
 fm_q2 <- formula(get.models(model_combinations_q2, 
                                  subset = 1)[[1]])
-best_model_q2 <- lme(fm_q2, data = globnut, random = ~1|cell)
+best_model_q2 <- lme(log(q2) ~ biomass_cent + I(biomass_cent^2) + MAP_cent + MAT_cent + 
+    ndep_cent + I(ndep_cent^2) + NP_cent + PET_cent + log(plot_size), data = globnut, random = ~1|cell)
 
-check_heteroscedasticity(best_model_q2)
+check_heteroscedasticity(best_model_q2) %>% plot
 check_outliers(best_model_q2)
 check_collinearity(best_model_q2)
 
-# plot_size position in formula
-var_position <- grep("plot_size" , attr(terms(fm_q2), "term.labels"))
-q2_regions_ndep <- globnut %>%
-  filter(!is.na(region)) %>%
-  group_by(region) %>%
-  nest() %>%
-  mutate(
-    mod = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        fm_q2 <- update(fm_q2,
-                              drop.terms(terms(fm_q2),
-                                         var_position,
-                                         keep.response = TRUE))
-        lme(fm_q2, random = ~ 1 | cell, data = df)
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q2, random = ~ 1 | cell, data = df)
-      }
-    }),
-    # test for significance
-    sig = purrr::map(mod, ~ ifelse(
-      anova(.)["ndep_cent", "p-value"] <=
-        0.05, "significant", "not-significant"
-    )) %>%
-      unlist,
-    # prediction
-    pred = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        lme(update(
-          fm_q2,
-          drop.terms(terms(fm_q2),
-                     var_position,
-                     keep.response = TRUE)
-        ),
-        random = ~ 1 |
-          cell,
-        data = df) %>% ggeffects::ggpredict(., terms = "ndep_cent")
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q2, random = ~ 1 |
-              cell, data = df) %>% ggeffects::ggpredict(., terms = "ndep_cent")
-      }
-    })
-  ) %>%
-  dplyr::select(region, pred, sig) %>%
-  unnest(pred)
-
-# apply model per region, get prediction
-q2_regions_np <- globnut %>%
-  filter(!is.na(region)) %>%
-  group_by(region) %>%
-  nest() %>%
-  mutate(
-    mod = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        fm_q2 <- update(fm_q2,
-                              drop.terms(terms(fm_q2),
-                                         var_position,
-                                         keep.response = TRUE))
-        lme(fm_q2, random = ~ 1 | cell, data = df)
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q2, random = ~ 1 | cell, data = df)
-      }
-    }),
-    # test for significance
-    sig = purrr::map(mod, ~ ifelse(
-      anova(.)["NP_cent", "p-value"] <=
-        0.05, "significant", "not-significant"
-    )) %>%
-      unlist,
-    # prediction
-    pred = purrr::map(data, ~ {
-      df <- as.data.frame(.)
-      # when plot size is equal in a region drop plot size from formula
-      if (length(unique(df$plot_size)) == 1) {
-        lme(update(
-          fm_q2,
-          drop.terms(terms(fm_q2),
-                     var_position,
-                     keep.response = TRUE)
-        ),
-        random = ~ 1 |
-          cell,
-        data = df) %>% ggeffects::ggpredict(., terms = "NP_cent")
-      } else {
-        # keep original if plot size is not equal
-        lme(fm_q2, random = ~ 1 |
-              cell, data = df) %>% ggeffects::ggpredict(., terms = "NP_cent")
-      }
-    })
-  ) %>%
-  dplyr::select(region, pred, sig) %>%
-  unnest(pred)
 ```
 
 ```{r}
 # plot terms
-q2_limits <- c(0, 30) 
-q2_limits2 <- c(0, 30) 
-cdl <- ggeffects::ggpredict(best_model_q2, terms = c("ndep_cent [0.57]")) %>% 
+q2_limits <- c(0, 15) 
+
+cdl <- ggeffects::ggpredict(best_model_q2, terms = c("ndep_cent [0.57]",
+                                                     "NP_cent [np_val]",
+                                                     "plot_size [stand_plot]")) %>% 
   mutate(x = (exp(x + mean(globnut$ndep))/1000)/5) %>% drop_na()
 vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
 horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
 
 # nutrients
-(q2_ndep <- ggeffects::ggpredict(best_model_q2,
-                                 terms = c("ndep_cent [all]")) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = predicted)) +
-        geom_hex(data = globnut, aes(x = exp(ndep)/1000/5, y = q2)) +
- scale_fill_gradient("Count",low = "#e5f5e0", high = "#31a354", limits = c(0,50)) +
-       geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5) +
-      geom_line(linewidth = 1) +
-     geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
-  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),linetype = "dashed") + 
+q2_ndep_np <- 
+  ggeffects::ggpredict(best_model_q2,
+                                 terms = c("ndep_cent [all]", "NP_cent [np_val]",
+                                           "plot_size [stand_plot]")) %>% 
+  as.data.frame() %>% 
+    mutate(group = exp(as.numeric(as.character(group)) + 
+                         mean(globnut$NP)) %>% as.factor()) 
+q2_ndep_np <- 
+ggplot(data = globnut, aes(x = exp(ndep)/1000/5, y = q2)) +
+    geom_hex() +
+    scale_fill_gradient("Count", low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = q2_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = predicted, 
+             fill = group, ymin = conf.low, 
+             ymax = conf.high), col = NA, alpha = .5) +
+    geom_line(data = q2_ndep_np, aes(x = (exp(x + mean(globnut$ndep))/1000)/5, 
+                                     y = predicted, col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
     scale_y_continuous("ENS (q2)", limits = q2_limits) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
                      breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-  theme_bw() )
-(q2_ndep2 <-  q2_regions_ndep %>% 
-              mutate(region = factor(region, levels = c("west_eu","alps","central_eu",
-                                                        "east_eu", 
-                                            "north_eu", "kaz", "jak"))) %>% 
-    ggplot(aes(x = (exp(x + mean(globnut$ndep))/1000)/5, y = predicted, color = region, 
-               fill = region )) +
-      geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
-    geom_line(aes(linetype = sig)) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-    scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
-    scale_y_continuous("ENS (q2)", limits = q2_limits2, oob = scales::rescale_none) +
-    scale_x_continuous("Average annual\nN-deposition (kg/ha)", trans = "log",
-                     breaks = c(1,2,5,10,20,60),
-                     labels = c(1,2,5,10,20,60)) +
-  theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
+                     labels = c(1,2,5,10,20,60)) + 
+  geom_segment(data = vert, aes(x = x, y = y, yend = yend, xend = xend),
+                              linewidth = 0.5,
+               linetype = "dashed") + 
+  geom_segment(data = horz, aes(x = x, y = y, yend = yend, xend = xend),
+               linewidth = 0.5,
+               linetype = "dashed") +
+  theme_bw()
 
-q2_np_pred <- ggeffects::ggpredict(best_model_q2,
-                                 terms = c("NP_cent [all]"))
-
-(q2_np <- ggplot() +
-    geom_hex(data = globnut, aes(x = exp(NP), y = q2)) +
-    scale_fill_gradient("Count",low = "#e5f5e0", high = "#31a354", limits = c(0,50)) +
- 
-      geom_ribbon(data = q2_np_pred, 
-                  aes(x = exp(x + mean(globnut$NP)), ymin = conf.low, 
-                      ymax = conf.high), alpha = .5) +
-      geom_line(data = q2_np_pred, aes(x = exp(x + mean(globnut$NP)), 
-                                       y = predicted), linewidth = 1) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
+q2_np_biomass <- ggeffects::ggpredict(best_model_q1, 
+                                          terms = c("biomass_cent [all]", 
+                                                    "NP_cent [np_val]", 
+                                                    "plot_size [stand_plot]"))  %>%
+    as.data.frame() %>% 
+    mutate(group = exp(as.numeric(as.character(group)) + mean(globnut$NP)) %>%
+             as.factor())
+q2_np_biomass <-           
+   ggplot(data = globnut, aes(x = exp(biomass), y = q2)) +
+    geom_hex() +
+       scale_fill_gradient("Count", low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = q2_np_biomass, aes(x = exp(x + mean(globnut$biomass)), 
+                                     y = predicted, 
+             fill = group,  ymin = conf.low, 
+             ymax = conf.high), col = NA, alpha = .5) +
+    geom_line(data = q2_np_biomass, aes(x = exp(x + mean(globnut$biomass)), 
+                                     y = predicted, col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
     scale_y_continuous("ENS (q2)", limits = q2_limits) +
-    theme_bw())
-(q2_np2 <- q2_regions_np %>% 
-              mutate(region = factor(region, levels = c("west_eu","alps",
-                                                        "central_eu", "east_eu", 
-                                            "north_eu", "kaz", "jak"))) %>% 
-    ggplot(aes(x = exp(x + mean(globnut$NP)), y = predicted, color = region, fill = region)) +
-      geom_ribbon(aes(ymin = conf.low, ymax = conf.high, alpha = sig), color = NA) +
-      geom_line(aes(linetype = sig)) +
-    scale_x_continuous("N/P",limits = c(0,40)) +
-  scale_y_continuous("ENS (q2)", limits = q2_limits2,  oob = scales::rescale_none) +
-     scale_alpha_manual(values = c("significant" = 0.4, "not-significant" = 0.2)) +
-    scale_linetype_manual(values = c("significant" = "solid", "not-significant" = "dashed")) +
-    scale_fill_manual(values = region_color, labels = region_label2) +
-    scale_color_manual(values = region_color, labels = region_label2) +
-    theme_bw() +
-  theme(legend.title = element_blank()) +
-  guides(alpha = "none", linetype = "none"))
+    scale_x_log10(Biomass~(g~m^-2)) +
+  theme_bw()
 
 ```
 
 ## Plots
 
 ```{r}
-library(patchwork)
-p_q0 <- (biomass_ndep | richness_ndep) / (biomass_np | richness_np) /
-  (biomass_ndep2 | richness_ndep2) / (biomass_np2 | richness_np2) +
+p_q0 <- (biomass_ndep_np | richness_ndep_np | richness_np_biomass) + 
   plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'a') &
-  theme(legend.position = "bottom", text = element_text(size = 10))
-p_q1 <-
-  ((biomass_ndep |
-      biomass_ndep2 |
-      q1_ndep | q1_ndep2) / (biomass_np | biomass_np2 | q1_np | q1_np2)
-  ) +
-  plot_layout(guides = 'collect') +  plot_annotation(tag_levels = 'a') &
-  theme(legend.position = "bottom", text = element_text(size = 10))
-p_q2 <-
-  ((biomass_ndep |
-      biomass_ndep2 |
-      q2_ndep | q2_ndep2) / (biomass_np | biomass_np2 | q2_np | q2_np2)
-  ) +
+  theme(legend.position = "bottom", text = element_text(size = 8))
+
+p_q1q2 <- ((q1_ndep_np | q1_np_biomass) / (q2_ndep_np | q2_np_biomass)) +
   plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'a') &
-  theme(legend.position = "bottom", text = element_text(size = 10))
-p_q1q2 <-
-  (q1_ndep |
-     q2_ndep) / (q1_np | q2_np) / (q1_ndep2 | q2_ndep2) / (q1_np2 |
-                                                             q2_np2) +
-  plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'a') &
-  theme(legend.position = "bottom", text = element_text(size = 10))
+  theme(legend.position = "bottom", text = element_text(size = 8))
 
-ggsave("figures/fig3_q0_regions_density.png", p_q0, dpi = 300, width = 9, height = 10)
-ggsave("figures/fig3_q1_regions_density.png", p_q1, dpi = 300, width = 9, height = 6)
-ggsave("figures/fig3_q2_regions_density.png", p_q2, dpi = 300, width = 9, height = 6)
-ggsave("figures/Supp_q1q2_density.png", p_q1q2, dpi = 300, width = 9, height = 10)
+ggsave("figures/Files_Ton/fig3_q0_np_levels.pdf", p_q0, 
+       dpi = 300, width = 8, height = 3)
 
-ggsave("figures/Files_Ton/fig3_q0_regions_density.pdf", p_q0, 
-       dpi = 300, width = 9, height = 9)
+ggsave("figures/Files_Ton/Supp_q1q2_np_levels.pdf", p_q1q2, 
+       dpi = 300, width = 8, height = 5)
 
-ggsave("figures/Files_Ton/Supp_q1q2_regions_density.pdf", p_q1q2, 
-       dpi = 300, width = 9, height = 9)
 
 ```
 
@@ -1033,62 +539,3 @@ model_parameters(best_model_q2) %>%
 ```
 
 
-## Model selection
-
-```{r eval=FALSE, include=FALSE}
-## biomass
-# Create a table with the model formula, AIC, and delta AIC
-model_table <- cbind(Formula = get.models(model_combinations, subset = TRUE) %>% 
-                       map(., ~formula(., fixed.only = TRUE)),
-                      AIC = round(model_combinations$AICc, 2),
-                      Delta_AIC = round(model_combinations$delta, 2)) %>% 
-  as.data.frame(row.names = NULL) 
-
-# Create a table in R Markdown format
-kable(model_table, row.names = FALSE)
-
-compare_performance(get.models(model_combinations, subset = 1:10)) %>% kable
-
-
-## Richness
-# Create a table with the model formula, AIC, and delta AIC
-model_table_richness <- cbind(Formula = get.models(model_combinations_richness, subset = TRUE) %>% 
-                       map(., ~formula(., fixed.only = TRUE)),
-                      AIC = round(model_combinations_richness$AICc, 2),
-                      Delta_AIC = round(model_combinations_richness$delta, 2)) %>% 
-  as.data.frame(row.names = NULL)
-
-# Create a table in R Markdown format
-kable(model_table_richness, row.names = FALSE)
-
-compare_performance(get.models(model_combinations_richness, subset = 1:10)) 
-
-
-## q1
-# Create a table with the model formula, AIC, and delta AIC
-model_table_q1 <- cbind(Formula = get.models(model_combinations_q1, subset = TRUE) %>% 
-                       map(., ~formula(., fixed.only = TRUE)),
-                      AIC = round(model_combinations_q1$AICc, 2),
-                      Delta_AIC = round(model_combinations_q1$delta, 2)) %>% 
-  as.data.frame(row.names = NULL) 
-
-
-# Create a table in R Markdown format
-kable(model_table_q1, row.names = FALSE)
-
-compare_performance(get.models(model_combinations_q1, subset = 1:10)) 
-
-
-## q2
-# Create a table with the model formula, AIC, and delta AIC
-model_table_q2 <- cbind(Formula = get.models(model_combinations_q2, subset = TRUE) %>% 
-                       map(., ~formula(., fixed.only = TRUE)),
-                      AIC = round(model_combinations_q2$AICc, 2),
-                      Delta_AIC = round(model_combinations_q2$delta, 2)) %>% 
-  as.data.frame(row.names = NULL) 
-
-# Create a table in R Markdown format
-kable(model_table_q2, row.names = FALSE)
-
-compare_performance(get.models(model_combinations_q2, subset = 1:10)) 
-```
