@@ -27,9 +27,6 @@ if (!require(rnaturalearth)) install.packages("rnaturalearth")
 if (!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
 if (!require(patchwork)) install.packages("patchwork")
 if (!require(sf)) install.packages("sf")
-if (!require(ggExtra)) install.packages("ggExtra")
-if (!require(gridExtra)) install.packages("gridEXtra")
-if (!require(quantreg)) install.packages("quantreg")
 if (!require(mgcv)) install.packages("mgcv")
 
 ## Load data
@@ -54,7 +51,7 @@ region_alias <- data.frame(ecoregion = c("Alps conifer and mixed forests",
                                       "Western European broadleaf forests"),
                            region = c("alps", "north_eu", "jak", "west_eu", "kaz", 
                                      "east_eu", "central_eu"),
-                           label = c("Alps", "Northeastern Europe", "Yakutsk", "Western Europe",
+                           label = c("Alps", "Northeastern Europe", "Yakutsia", "Western Europe",
                                      "Kazakhstan", "Eastern Europe", "Central Europe"))
 
 # select plots for vizualization
@@ -414,91 +411,31 @@ p_all
 ggsave("figures/fig1_geography_lim_regions_Nlim14.png", p_all, dpi = 300, height = 7, width = 7)
 ggsave("figures/Files_Ton/fig1_geography_lim_regions.pdf", p_all, dpi = 300, height = 7, width = 7)
 
-# Biomass - species plot () ----
+## Ecoregions map supplementary ----
 globnut <- readRDS("outputs/02_GlobNut.rds") %>% 
-  ungroup() %>% 
-  filter(!lim == "No limitation by N, P, K") %>% 
   dplyr::filter(between(lat, 35, 75)) %>% 
-  dplyr::filter(between(lon, -25, 150)) %>% 
-  drop_na %>% 
-  mutate(biomass_cent = biomass - mean(biomass))
+  dplyr::filter(between(lon, -25, 150)) 
 
-n_lm <- lm(log(spec_ric) ~ biomass_cent + I(biomass_cent^2) + log(plot_size), 
-           data = globnut[globnut$lim == "N-limitation",])
-co_lm <- lm(log(spec_ric) ~ biomass_cent + I(biomass_cent^2) + log(plot_size),
-            data = globnut[globnut$lim == "Co-limitation N-P",])
-p_lm <- lm(log(spec_ric) ~ biomass_cent + I(biomass_cent^2) + log(plot_size), 
-           data = globnut[globnut$lim == "P-limitation",])
+sf_use_s2(FALSE)
+ecoreg <- 
+  terra::vect("C:/Users/3768651/OneDrive - Universiteit Utrecht/Documents/Projects/Ongoing/ESy/data/Ecoregions2017/Ecoregions2017.shp") %>% 
+  st_as_sf() %>% 
+  # fix geometry of russia (sf_use_s2() must be FALSE for this)
+  st_make_valid() %>% 
+  st_crop(., c(xmin = -25, ymin = 35, xmax = 150, ymax = 72)) 
+coords_sf <- st_as_sf(globnut, coords = c("lon", "lat"), crs = 4326)
 
-n_qr <- rq(log(spec_ric) ~ biomass_cent + I(biomass_cent^2) + log(plot_size), data = globnut[globnut$lim == "N-limitation",],
-            tau = 0.9)
-co_qr <- rq(log(spec_ric) ~ biomass_cent + I(biomass_cent^2) + log(plot_size), data = globnut[globnut$lim == "Co-limitation N-P",],
-           tau = 0.9)
-p_qr <- rq(log(spec_ric) ~ biomass_cent + I(biomass_cent^2) + log(plot_size), data = globnut[globnut$lim == "P-limitation",],
-            tau = 0.9)
-
-df <- data.frame(biomass_cent = seq(-300,1200), plot_size = 4)
-pred_qr <- rbind(predict(n_qr, df) %>% 
-                   as.data.frame() %>% 
-                   mutate(spec_ric = exp(.),  
-                          biomass_cent = df$biomass_cent,
-                          lim = "N-limitation",
-                          biomass = biomass_cent + mean(globnut$biomass)),
-                 predict(co_qr, df) %>% 
-                   as.data.frame() %>% 
-                   mutate(spec_ric = exp(.),  
-                          biomass_cent = df$biomass_cent,
-                          lim = "Co-limitation N-P",
-                          biomass = biomass_cent + mean(globnut$biomass)),
-                 predict(p_qr, df) %>% 
-                   as.data.frame() %>% 
-                   mutate(spec_ric = exp(.),  
-                          biomass_cent = df$biomass_cent,
-                          lim = "P-limitation",
-                          biomass = biomass_cent + mean(globnut$biomass)))
-                 
-
-pred_lm <- rbind(ggeffects::ggpredict(n_lm, terms = "biomass_cent [-300:1200]") %>% 
-                   as.data.frame() %>% 
-        mutate(lim = "N-limitation",
-               biomass = x + mean(globnut$biomass),
-               spec_ric = predicted),
-     ggeffects::ggpredict(co_lm, terms = "biomass_cent [-300:1200]") %>% 
-        as.data.frame() %>% 
-        mutate(lim = "Co-limitation N-P",
-               biomass = x + mean(globnut$biomass),
-               spec_ric = predicted),
-     ggeffects::ggpredict(p_lm, terms = "biomass_cent [-300:1200]") %>% 
-        as.data.frame() %>% 
-        mutate(lim = "P-limitation",
-               biomass = x + mean(globnut$biomass),
-               spec_ric = predicted))
-# significance between limitation categories
-m <- aov(log(biomass) ~ lim, data = globnut)
-plot(m)
-TukeyHSD(m)
-
-m <- aov(log(spec_ric) ~ lim, data = globnut)
-plot(m)
-
-TukeyHSD(m)
-
-colours_lim <- c('#1b9e77','#d95f02','#7570b3')
-g <- ggplot() +
-  geom_point(data = globnut, aes(x = biomass, y = spec_ric, col = lim), alpha = 0.25, size = 0.5) +
-  geom_line(data = pred_lm, aes(x = biomass, y = spec_ric, col = lim)) + 
-  geom_line(data = pred_qr, aes(x = biomass, y = spec_ric, col = lim), linetype = "dashed") +
-  scale_color_manual(values = colours_lim) +
-  scale_x_continuous(Biomass~(g/m^2), limits = c(0,1600)) +
-  scale_y_continuous("Species richness", limits = c(0, 150)) +
+ecoreg_used <- ecoreg %>% 
+  filter(ECO_NAME %in% region_alias$ecoregion)
+region_alias <- data.frame(col = region_color, region = names(region_color)) %>% 
+  left_join(region_alias)
+eco_col <- region_alias$col
+names(eco_col) <- region_alias$ecoregion
+ggplot() +
+  geom_sf(data = ecoreg, fill = "grey95") +
+  geom_sf(data = ecoreg_used, aes(fill = ECO_NAME), alpha = 0.5) +
+  scale_fill_manual("",values = eco_col) +
+  geom_sf(data = coords_sf, shape = 4, size = 0.75, linewidth = 0.1) +
   theme_bw() +
-  theme(legend.position = c(0.8,0.9),
-        legend.title = element_blank(),
-        legend.background = element_blank())
-g
-g_mar <- ggMarginal(g, type = "boxplot", size = 5, groupFill = TRUE, groupColour = TRUE)
-
-ggsave("figures/Files_Ton/Sup_bio_specRic_lim.pdf", g_mar, 
-       dpi = 300, height = 5, width = 5)
-
-ggsave("figures/Sup_bio_specRic_limN14.png",g_mar, dpi = 300, height = 5, width = 5)
+  theme(legend.positio n = "bottom")
+ggsave("figures/Ecoregion_plot.png", dpi = 300, height = 4, width = 9)
