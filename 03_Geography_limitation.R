@@ -408,7 +408,6 @@ p_all <- p_map + free(p_lon) + free(p_lat) +
   plot_layout(design = design) + plot_annotation(tag_levels = "a")
 p_all
 
-ggsave("figures/fig1_geography_lim_regions_Nlim14.png", p_all, dpi = 300, height = 7, width = 7)
 ggsave("figures/Files_Ton/fig1_geography_lim_regions.pdf", p_all, dpi = 300, height = 7, width = 7)
 
 ## Ecoregions map supplementary ----
