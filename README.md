@@ -4,7 +4,7 @@ This repo contains the code for the article "Nutrient stoichiometry mediates nit
 
 ## Environmental data
 
-`/env_data` contains the scripts to extract and process for analysis. The repo `/env_data/outputs` contains the data produced by these scripts.
+`/env_data` contains the scripts to extract and process environmental data for analysis. The repo `/env_data/outputs` contains the data produced by these scripts.
 
 -   `Extract_geology.R` - for computing the rock acidity variable
 
@@ -18,7 +18,7 @@ This repo contains the code for the article "Nutrient stoichiometry mediates nit
 
 -    `01_Species_diversity_indices.R` - to calculate species diversity indices
 
--   `02_Plot_selection.R` - to compile data set for analysis and subsampling
+-   `02_Plot_selection.R` - compiles data set for analysis and performs sub-sampling
 
 ## Main analysis
 
@@ -30,7 +30,7 @@ Note: figures in manuscripts are post-processed in Adobe Illustrator, so figures
 
 -   `03_Linear_mixed_models.Rmd` - linear mixed modelling, fig 3 and supplementary information fig. S2.1 and tables 2.1-2.4
 
--   `03_Zi_Beta_regression.Rmd`  - calculates distance metrics and runs zero-inflated beta regression
+-   `03_Zi_Beta_regression.Rmd`  - calculates distance metrics, runs zero-inflated beta regression, produces fig. 4
 
 Data to run these scripts is available at: <https://osf.io/pgxrt/>
 
