@@ -31,9 +31,6 @@ globnut <- readRDS(params$data) %>% ungroup() %>%
     filter(!lim == "No limitation by N, P, K") %>% 
    dplyr::filter(between(lat, 35, 75)) %>% 
   dplyr::filter(between(lon, -25, 150)) %>% 
-  mutate(soil_age = factor(soil_age, levels = c("1", "2", "3")),
-         lith_simp = factor(lith_simp, levels = c("acid", "intermediate",
-                                                  "well-buffered")))  %>% 
   drop_na %>% 
   mutate(biomass = log(biomass),
          ndep = log(ndep*10), # to g/ha en log
@@ -68,7 +65,7 @@ check_outliers(full_model_biomass)
 check_collinearity(full_model_biomass)
 
 # Generate all possible model combinations
-# Define subset criteria for model selection: quadratic terms can only be included if linear terms are included as well
+# Define subset criteria for model selection: Only run model selection on quadratic terms 
 sb <- expression(MAT_cent & MAP_cent & PET_cent & NP_cent & ndep_cent)
 model_combinations <- dredge(full_model_biomass, subset = sb)
 
@@ -93,7 +90,7 @@ vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group =
 horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, 
                    yend = cdl$predicted, group = cdl$group)  
 
-# nutrients
+# Ndepostion effect on biomass by stoichiometry
 biomass_ndep_np <- 
   ggeffects::ggpredict(best_model_biomass,
                                  terms = c("ndep_cent [all]", "NP_cent [np_val]")) %>% 
@@ -138,6 +135,7 @@ check_heteroscedasticity(full_model_richness) %>% plot
 check_collinearity(full_model_richness)
 check_outliers(full_model_richness)
 
+# update selection criteria to include biomass
 sb <- expression(MAT_cent & MAP_cent & PET_cent & NP_cent & 
                    ndep_cent & biomass_cent)
 
@@ -167,7 +165,7 @@ cdl <- ggeffects::ggpredict(best_model_richness, terms = c("ndep_cent [cdl_cent]
 vert <- data.frame(x = cdl$x, xend = cdl$x, y = cdl$predicted, yend = 0, group = cdl$group)  
 horz <- data.frame(x = cdl$x, xend = 0, y = cdl$predicted, yend = cdl$predicted, group = cdl$group)  
 
-# n-deposition
+# n-deposition effect on richness by NP level
 richness_ndep_np <- 
   ggeffects::ggpredict(best_model_richness,
                                  terms = c("ndep_cent [all]", "NP_cent [np_val]",
