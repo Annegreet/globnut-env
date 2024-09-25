@@ -86,7 +86,7 @@ globnut <- globnut_raw %>%
   dplyr::select(-z_biomass)
 saveRDS(globnut, "outputs/02_GlobNut.rds")
 
-# sub sampled data set to check the effect of oversample areas - 5 per cell
+# sub sampled data set to account for oversampled areas - max 5 plots per cell
 set.seed(123)
 globnut_samp <- globnut %>% 
   group_by(cell) %>%
