@@ -30,7 +30,7 @@ Note: figures in manuscripts are post-processed in Adobe Illustrator, so figures
 
 -   `03_Linear_mixed_models.Rmd` - linear mixed modelling, fig 3 and supplementary information fig. S2.1 and tables 2.1-2.4
 
--   `03_Zi_Beta_regression.Rmd`  - calculates distance metrics and runs zero-inflated beta regression
+-   `03_Zi_Beta_regression.Rmd`  - calculates distance metrics, runs zero-inflated beta regression, produces fig. 4
 
 Data to run these scripts is available at: <https://osf.io/pgxrt/>
 
