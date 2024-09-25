@@ -18,7 +18,7 @@ This repo contains the code for the article "Nutrient stoichiometry mediates nit
 
 -    `01_Species_diversity_indices.R` - to calculate species diversity indices
 
--   `02_Plot_selection.R` - to compile data set for analysis and subsampling
+-   `02_Plot_selection.R` - compiles data set for analysis and performs subsampling
 
 ## Main analysis
 
