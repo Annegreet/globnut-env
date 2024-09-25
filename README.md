@@ -1,6 +1,39 @@
-# Globnut env
-Repo contains code for the article "Eurasian plant diversity will benefit from lowering N deposition and preserving N/P variation" (in prep).
+# globnut-env
 
-## Reproducibility
-Users are encouraged to use the renv package to make sure they all use the same package versions.
-renv will run checks and let you know if the packages you are using are the same versions as your collaborators'. If you install additional packages, let renv save that package name and version by using renv::snapshot() and collaborators will receive this information through git. renv will then recommend collaborators to run renv::restore() to install missing packages.
+This repo contains the code for the article "Nutrient stoichiometry mediates nitrogen deposition effects on plant diversity" (in prep).
+
+## Environmental data
+
+`/env_data` contains the scripts to extract and process for analysis. The repo `/env_data/outputs` contains the data produced by these scripts.
+
+-   `Extract_geology.R` - for computing the rock acidity variable
+
+-   `Extract_glacial_extent.R`  - for computing the soil age variable
+
+-   `Extract_N_deposition.R` - to calculate the N deposition variable and fig. 1b
+
+## Preparing data
+
+-   `01_Gridding_globnut.R` - to create the grid for random effects and sub-sampling
+
+-    `01_Species_diversity_indices.R` - to calculate species diversity indices
+
+-   `02_Plot_selection.R` - to compile data set for analysis and subsampling
+
+## Main analysis
+
+Note: figures in manuscripts are post-processed in Adobe Illustrator, so figures produced by the script will differ in appearance.
+
+-   `03_Geography_limitation.R`  - produces input for fig 1a and 1c
+
+-   `03_SEM_GlobNut.R` - produces SEM, displayed in fig 2 and supplementary information fig. 1.3
+
+-   `03_Linear_mixed_models.Rmd` - linear mixed modelling, fig 3 and supplementary information fig. S2.1 and tables 2.1-2.4
+
+-   `03_Zi_Beta_regression.Rmd`  - calculates distance metrics and runs zero-inflated beta regression
+
+Data to run these scripts is available at: <https://osf.io/pgxrt/>
+
+## R packages
+
+Users can use the `renv` R package to make sure the same R packages and versions are used. Run `renv::restore()` to install missing packages.
