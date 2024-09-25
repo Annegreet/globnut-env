@@ -368,17 +368,16 @@ r_df <- as.data.frame(ndep, xy = TRUE)
 colnames(r_df) <- c("x", "y", "value")
 
 r_df <- r_df %>%
-  mutate(category = cut(value, breaks = c(-Inf, 5, 10, 20, 40, Inf),
-                        labels = c("< 5", "5-10", "10-20", "20-40", "> 40")))
+  mutate(category = cut(value, breaks = c(-Inf, 5, 15, 30, Inf),
+                        labels = c("< 5", "5-15", "15-30","> 30")))
 
 ggplot(r_df, aes(x = x, y = y, fill = category)) +
   geom_raster() +
   scale_fill_manual(values = c("< 5" = "grey90",
-                               "5-10" = "grey70",
-                               "10-20" = "grey50",
-                               "20-40" = "grey30",
-                               "> 40" = "grey10"),na.translate = FALSE) +
-  labs(fill = "kg N/ha/yr") +
+                               "5-15" = "grey70",
+                               "15-30" = "grey50",
+                               "> 30" = "grey30"),na.translate = FALSE) +
+  labs(fill = "N deposition (kg ha-1) (2020)") +
   theme_minimal() +
   theme(legend.position = "right")
 ggsave("figures/Files_Ton/Base_map_ndep.pdf", dpi = 300)
