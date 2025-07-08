@@ -46,7 +46,7 @@ gn_grid <- dgSEQNUM_to_GEO(dggs,globnut$cell) %>%
   data.frame(globnut$plot_ID, cell = globnut$cell, lon = .$lon_deg, lat = .$lat_deg) 
 # saveRDS(gn_grid, "outputs/01_Globnut_grid_res15.rds")
 
-
+gn_grid
 
 
 
