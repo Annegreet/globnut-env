@@ -1,0 +1,481 @@
+---
+title: "03_Beta_diversity_analysis"
+author: "Annegreet Veeken"
+date: "`r Sys.Date()`"
+output:
+  word_document:
+    toc: true
+  html_document:
+    code_folding: hide
+    toc: true
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+## Load packages
+if(!require(tidyverse)) install.packages(tidyverse)
+if(!require(geosphere)) install.packages(geosphere)
+if(!require(easystats)) install.packages(easystats)
+if(!require(rnaturalearth)) install.packages(rnaturalearth)
+if(!require(rnaturalearthdata)) install.packages(rnaturalearthdata)
+if(!require(lme4)) install.packages(lme4)
+if(!require(spdep)) install.packages(spdep)
+if(!require(sf)) install.packages(sf)
+if(!require(broom)) install.packages(broom)
+if(!require(MuMIn)) install.packages(MuMin)
+if(!require(patchwork)) install.packages(patchwork)
+if(!require(iNEXT.beta3D)) install.packages(iNEXT.beta3D)
+if(!require(terra)) install.packages(terra)
+
+## Load data
+dir <- "~/Data/Globnut_offline/_GLOBNUT1.0/"
+
+globnut <- readRDS("outputs/02_GlobNut.rds") %>% 
+  ungroup() %>% 
+  # dplyr::select(plot_ID, cell,cell_lon, cell_lat, habitat, lon, lat, sample_year,
+  #               ndep, MAP, MAT, PET, NP, biomass, elev) %>% 
+  # grouping for beta diversity is habitat by cell
+  mutate(cell_hab = paste(cell, habitat, sep = "_"))
+spec_raw <- read.csv(paste0(dir, "GlobNut1.0_species.csv")) 
+spec <- spec_raw %>% 
+  ungroup() %>% 
+  # only vascular plants
+  dplyr::filter(vascular_plant == 1) %>% 
+  # convert subspecies to species
+  mutate(species_new = 
+           str_remove(species_new, pattern = " subsp.*| var\\.")) %>%
+  group_by(plot_ID, species_new) %>% # aggregate by species
+  summarise(cover = sum(cover, na.rm = TRUE)) %>% 
+  dplyr::filter(cover != 0)  %>% 
+  #  to 100 %
+  group_by(plot_ID) %>% 
+  mutate(covertot = sum(cover), 
+         cover = round(cover/covertot*100))  %>% 
+  left_join(globnut %>% dplyr::select(plot_ID, cell, habitat, cell_hab), by = "plot_ID") %>% 
+  drop_na(cell, habitat, cell_hab) %>% 
+  filter(cover > 0)
+
+set.seed(123)
+nobs <- 3
+```
+
+```{r functions}
+result_figure <- function(mod) {
+  p <- mod %>% 
+   model_parameters() %>%   
+  filter(Effects == "fixed") %>% 
+  filter(!Parameter %in% c("(Intercept)", "distm")) %>% 
+  mutate(Parameter = case_match(Parameter,
+                "dif_np" ~ "Difference N/P",
+                "ndep" ~ "N deposition",
+                "mean_np" ~ "Mean N/P",
+                "dif_bio" ~ "Difference biomass",
+                "mean_bio" ~ "Mean biomass")) %>% 
+  ggplot(aes(y = Parameter, x = Coefficient)) +
+    geom_vline(aes(xintercept = 0)) +
+    geom_errorbar(aes(xmin = CI_low, xmax = CI_high),  width = 0.25) +
+  geom_point(shape = 21, size = 3, fill = "#a1d99b") +        
+  scale_x_continuous("Standardized effect") +
+  scale_y_discrete("") + 
+  theme_bw()+
+  theme(legend.position = "none")
+p
+}
+
+result_table <- function(mod){
+  tab <-  mod %>% 
+  model_parameters() %>%   
+  filter(Effects == "fixed") %>% 
+  mutate(Parameter = case_match(Parameter,
+                           "(Intercept)" ~ "Intercept",
+                "dif_np" ~ "Difference N/P",
+                "ndep" ~ "N deposition",
+                "mean_np" ~ "Mean N/P",
+                "dif_bio" ~ "Difference biomass",
+                "distm" ~ "Geographical distance",
+                "mean_bio" ~ "Mean biomass")) %>% 
+  # Combine coefficient and SE
+  mutate(`Estimate (SD)`= paste0(round(Coefficient, 3), " (", round(SE, 3), ")"),
+      # Combine CI
+      CI = paste0("[", round(CI_low, 3), ", ", round(CI_high, 3), "]"),
+      `Significance level` = case_when(
+        p < 0.001 ~ "***",
+                    p < 0.01 ~ "**",
+                    p < 0.05 ~ "*",
+                    TRUE ~ ""),
+      `p-value` = round(p, 4)) %>% 
+  select(Parameter, `Estimate (SD)`, CI, `p-value`, `Significance level`) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          `Estimate (SD)` = c(round(r2(mod)$R2_conditional,3), round(r2(mod)$R2_marginal,3)) %>% as.character()) %>% 
+  knitr::kable()
+  return(tab)
+}
+```
+
+```{r ecoregions}
+
+# # Extract ecoregions for globnut
+# ecoregions <- terra::vect("~/Data/Ecoregions2017/Ecoregions2017.shp")
+# # terra::crs(ecoregions)
+# coords_df <- globnut %>%
+#   dplyr::select(cell, cell_lon, cell_lat) %>%
+#   distinct()
+# coords <- terra::vect(coords_df, geom = c("cell_lon", "cell_lat"),  crs = "EPSG:4326")
+# ecoreg_globnut <- cbind(coords_df[,c("cell", "cell_lon", "cell_lat")],terra::extract(ecoregions,  coords)) %>% 
+#   select(cell, cell_lon, cell_lat, ECO_NAME)
+# 
+# # take the nearest for cells that didn't return a value
+# missing_values <- ecoreg_globnut %>% 
+#   filter(is.na(ECO_NAME))
+# missing_coords_df <- missing_values %>% 
+#   dplyr::select(cell, cell_lon, cell_lat)
+# missing_coords <- terra::vect(missing_coords_df, geom = c("cell_lon", "cell_lat"),  crs = "EPSG:4326")
+# nearest_ecoreg <- cbind(missing_coords_df[,c("cell", "cell_lon", "cell_lat")], terra::nearest(missing_coords, ecoregions))
+# ids <- terra::values(ecoregions) %>% 
+#   as.data.frame() %>% 
+#   dplyr::select(OBJECTID, ECO_NAME) 
+# missing_ecoreg <- nearest_ecoreg %>% 
+#   left_join(ids, by = c("to_id" = "OBJECTID")) %>% 
+#   select(cell, cell_lon, cell_lat, ECO_NAME)
+# 
+# # combine 
+# ecoreg_globnut <- ecoreg_globnut %>% 
+#   filter(!is.na(ECO_NAME)) %>% 
+#   bind_rows(missing_ecoreg)
+  
+# saveRDS(ecoreg_globnut, "outputs/Ecoregions_emep_grid.rds")
+ecoreg <- readRDS( "outputs/Ecoregions_emep_grid.rds")
+```
+
+```{r nobs}
+# in cell
+# check diff in sample year
+# discard plot pairs sampled > 10 year  from eachother
+plot_ids <- globnut %>% 
+  group_by(cell) %>% 
+  # all combinations of plots in a cell
+  tidyr::expand(plot_x = plot_ID, plot_y = plot_ID) %>% 
+  left_join(globnut %>% select(plot_ID, sample_year), by = c("plot_x" = "plot_ID")) %>% 
+  left_join(globnut %>% select(plot_ID, sample_year), by = c("plot_y" = "plot_ID"), 
+            suffix = c("_x","_y")) %>% 
+  # amount of years between sampling
+  mutate(diff_year = abs(sample_year_x - sample_year_y)) %>% 
+  # discard plot pairs that have been sampled more than 10 years apart
+  # select the  oldest plot
+  mutate(oldest_plot = ifelse(sample_year_x < sample_year_y, plot_x, plot_y)) %>% 
+  filter(!plot_x == plot_y) %>% # same plots
+  filter(diff_year > 10) %>% 
+  pull(oldest_plot) %>% 
+  unique() 
+
+## cells with enough data
+cell_ids <- globnut %>% 
+  # discard plots that are sampled too many years apart
+  filter(!plot_ID %in% plot_ids) %>% 
+  group_by(cell) %>% 
+  summarise(n = n()) %>% 
+  filter(n >= nobs) %>% 
+  pull(cell)
+```
+
+There are `r length(cell_ids)` gridcells with at least `r nobs` plots
+
+```{r map, warning=FALSE}
+# Euroasia shape file
+world <- ne_countries(scale = "medium", returnclass = "sf")
+eurasia <- world[world$continent %in% c("Asia", "Europe"),]
+coords_sf <- st_as_sf(unique(globnut[globnut$cell %in% cell_ids, c("cell_lon", "cell_lat")]), 
+                      coords = c("cell_lon", "cell_lat"), crs = 4326)
+  
+p <- ggplot() +
+  geom_sf(data = eurasia, fill = "grey90", col = "grey90") +
+  geom_sf(data = coords_sf,  alpha = 0.25) +
+  coord_sf(crs = "+proj=lcc +lat_1=45 +lat_2=55 +lat_0=50 +lon_0=35",
+           xlim = c(-4000000, 4500000), ylim = c(-1000000, 4500000)) +
+  theme_bw() 
+p
+
+```
+
+## Method
+
+Explanatory variables
+
+-   N deposition per gridcell `ndep`
+
+-   NP mean per gridcell `mean_np`
+
+-   Mean difference in NP between plots in a gridcell `dif_np`
+
+-   Biomass mean per gridcell `mean_bio`
+
+-   Mean biomass difference between plots in a gridcell `dif_bio`
+
+-   Mean MAT, MAP, PET in a gridcell `MAT, MAP, PET`
+
+-   Mean pH `pH`
+
+-   Mean distance in meters between plots `distm`
+
+-   Mean difference in elevation between plots `elev`
+
+-   Random effect of ecoregion `ECO_NAME`
+
+Full model:
+`beta ~ distm + elev + MAT + MAP + PET + pH + ndep + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME)`
+
+Model selection on `distm + elev + MAT + MAP + PET + pH`, always
+retaining `ndep + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME)`
+
+Running Moran's test for checking residual spatial autocorrelation
+
+```{r inext}
+## Run iNext for rarefaction and extrapolation of beta diversity
+# Convert to incidence format for inext
+# incidence_data <- spec %>%
+#   filter(!plot_ID %in% plot_ids) %>% 
+#   filter(cell %in% cell_ids) %>%  # cells with at least nobs observations
+#   filter(!cell == 538542) %>% # only 1 vasc species because high moss abundance, which iNext doesn't like
+#   ungroup() %>% 
+#   dplyr::select(cell, plot_ID, species_new, cover) %>%
+#   mutate(species_new = str_replace(species_new, pattern = "[:space:]", replacement = "_")) %>% 
+#   group_split(cell) %>%
+#   purrr::map(., ~pivot_wider(.,names_from = "plot_ID",values_from = "cover", values_fill = 0) %>%
+#                dplyr::select(.,-cell) %>% 
+#                column_to_rownames("species_new") %>% 
+#                as.matrix())
+
+# beta_results <- iNEXTbeta3D(
+#   data = incidence_data,
+#   diversity = "TD",  # Taxonomic diversity
+#   q = c(0, 1, 2),   # Multiple diversity orders
+#   datatype = "abundance",
+#   base = "coverage",
+#   level = 0.9,
+#   nboot = 200
+# )
+# saveRDS(beta_results, "outputs/inext_beta_output.rds")
+beta_results <- readRDS("outputs/inext_beta_output.rds")
+# Extract beta diversity estimates
+beta0 <- beta_results %>% 
+  map_df(., "beta") %>% 
+  filter(Order.q == 0) %>% 
+  mutate(cell = cell_ids[!cell_ids == 538542]) %>% 
+  rename(beta_inext = Beta)
+# Extract beta diversity estimates
+beta1 <- beta_results %>% 
+  map_df(., "beta") %>% 
+  filter(Order.q == 1) %>% 
+  mutate(cell = cell_ids[!cell_ids == 538542]) %>% 
+  rename(beta_inext = Beta)
+# Extract beta diversity estimates
+beta2 <- beta_results %>% 
+  map_df(., "beta") %>% 
+  filter(Order.q == 2) %>% 
+  mutate(cell = cell_ids[!cell_ids == 538542]) %>% 
+  rename(beta_inext = Beta)
+```
+
+```{r env-var}
+## Calculating explanatory variables
+env_var <- globnut %>% 
+ # same plots and cells as the incidence data
+ filter(!plot_ID %in% plot_ids) %>% 
+ filter(cell %in% cell_ids) %>% 
+ group_by(cell) %>% 
+ summarise(
+   nplots = n_distinct(plot_ID),
+   ## Confounders
+   # Distance between plots
+   distm = mean(distm(cbind(lon, lat), fun = distGeo)),
+           # Elevation difference between plots
+           elev = {diff_matrix <- abs(outer(elev, elev, "-"))
+           mean(diff_matrix[lower.tri(diff_matrix)])
+           },
+           # Average climate
+           MAT = mean(MAT, na.rm = TRUE),
+           MAP = mean(MAP, na.rm = TRUE),
+           PET = mean(PET, na.rm = TRUE),
+           # Number of habitats in a cell
+           nhab = n_distinct(habitat),
+           # average pH
+           pH = mean(pH),
+           ## Predictors
+           # n deposition
+           ndep = mean(ndep),
+           # Average biomass
+           mean_bio = mean(biomass),
+           # Average N/P
+           mean_np = mean(NP),
+           # Differences in NP
+           dif_np = {diff_matrix <- abs(outer(NP, NP, "-"))
+           mean(diff_matrix[lower.tri(diff_matrix)])
+           },
+           # Differences in biomass
+           dif_bio =  {diff_matrix <- abs(outer(biomass, biomass, "-"))
+             mean(diff_matrix[lower.tri(diff_matrix)])
+           },
+           # sample year
+           dif_year = {diff_matrix <- abs(outer(sample_year, sample_year, "-"))
+           mean(diff_matrix[lower.tri(diff_matrix)])
+           }
+           ) %>% 
+ mutate(ndep = log(ndep*10),
+        mean_bio = log(mean_bio),
+        dif_bio = log(dif_bio),
+        dif_np = log(dif_np),
+        mean_np = log(mean_np),
+        distm = log(distm +1),
+        elev = log(elev+1)
+        ) %>% 
+ drop_na()
+  
+# hist(env_var$elev)
+# hist(env_var$distm)
+# hist(env_var$MAT)
+# hist(env_var$MAP)
+# hist(env_var$PET)
+# hist(env_var$pH)
+# hist(env_var$ndep)
+# hist(env_var$mean_np)
+# hist(env_var$mean_bio)
+# hist(env_var$dif_bio)
+# hist(env_var$dif_np)
+# hist(env_var$nhab)
+```
+
+```{r mod-data}
+mod_dat <- env_var %>%    
+  # cell coordinates
+  left_join(globnut %>% 
+              dplyr::select(cell, cell_lon, cell_lat) %>% 
+              distinct(), by = "cell") %>%
+  # ecoregions
+  left_join(ecoreg %>% dplyr::select(cell, ECO_NAME), by = "cell") %>% # Check missing cells ecoregions!!!
+  # standardized beta div
+  left_join(beta0 %>% dplyr::select(cell, beta_q0 = beta_inext), by = "cell") %>%
+  left_join(beta1 %>% dplyr::select(cell, beta_q1 = beta_inext), by = "cell") %>% 
+  left_join(beta2 %>% dplyr::select(cell, beta_q2 = beta_inext), by = "cell") %>% 
+  drop_na() 
+# hist(beta0$beta_inext, breaks = 20)
+# hist(beta1$beta_inext, breaks = 20)
+# hist(beta2$beta_inext, breaks = 20)
+```
+
+## q0
+
+```{r}
+# full model 
+full_model_q0 <- lmer(log(beta_q0) ~ distm + elev + MAT + MAP + PET + pH  +
+          ndep  + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME),
+  data = mod_dat,
+  na.action = "na.fail") 
+# 
+# check_model(full_model_q0) 
+# summary(full_model_q0)
+
+sb <- c("mean_bio", "ndep", "dif_bio", "mean_np", "dif_np")
+dd <- dredge(full_model_q0, fixed =  sb)
+
+selected_model_q0 <- lmer(get.models(dd,1)[[1]], data = mod_dat)
+# check_model(selected_model_q0)
+# summary(selected_model_q0)
+
+# check residual spatial autocorrelation 
+mod_resid <- residuals(selected_model_q0) 
+knn_weights <- knearneigh(mod_dat[,c("cell_lon", "cell_lat")], k = 4)
+knn_list <- knn2nb(knn_weights)
+knn_weights_matrix <- nb2listw(knn_list, style = "W")
+
+# Moran's I test 
+moran_test <- moran.test(mod_resid, knn_weights_matrix)  
+
+result_figure(selected_model_q0)
+ggsave("figures/fig4-beta_diversity.png", dpi = 300, height = 4, width = 5)
+result_table(selected_model_q0)
+
+```
+
+Moran's test p value:`r round(moran_test$p.value,4)` - no residual
+autocorrelation
+
+## q1
+
+```{r}
+# full model 
+full_model_q1 <- lmer(log(beta_q1) ~ distm + elev + MAT + MAP + PET + pH  +
+          ndep  + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME),
+  data = mod_dat,
+  na.action = "na.fail") 
+
+# check_model(full_model_q1) 
+# summary(full_model_q1)
+
+sb <- c("mean_bio", "ndep", "dif_bio", "mean_np", "dif_np")
+dd <- dredge(full_model_q1, fixed =  sb)
+
+selected_model_q1 <- lmer(get.models(dd,1)[[1]], data = mod_dat)
+# check_model(selected_model_q1)
+# summary(selected_model_q1)
+
+# check residual spatial autocorrelation 
+mod_resid <- residuals(selected_model_q1) 
+knn_weights <- knearneigh(mod_dat[,c("cell_lon", "cell_lat")], k = 4)
+knn_list <- knn2nb(knn_weights)
+knn_weights_matrix <- nb2listw(knn_list, style = "W")
+
+# Moran's I test 
+moran_test <- moran.test(mod_resid, knn_weights_matrix)  
+
+result_figure(selected_model_q1)
+result_table(selected_model_q1)
+
+```
+
+Moran's test p value:`r round(moran_test$p.value,4)` - still residual
+autocorrelation
+
+## q2
+
+```{r}
+# full model 
+full_model_q2 <- lmer(log(beta_q2) ~ distm + elev + MAT + MAP + PET + pH  +
+          ndep  + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME),
+  data = mod_dat,
+  na.action = "na.fail") 
+# check_model(full_model_q2) 
+# summary(full_model_q2)
+
+sb <- c("mean_bio", "ndep", "dif_bio", "mean_np", "dif_np")
+dd <- dredge(full_model_q2, fixed =  sb)
+
+selected_model_q2 <- lmer(get.models(dd,1)[[1]], data = mod_dat)
+# check_model(selected_model_q2)
+# summary(selected_model_q2)
+
+# check residual spatial autocorrelation 
+mod_resid <- residuals(selected_model_q2) 
+knn_weights <- knearneigh(mod_dat[,c("cell_lon", "cell_lat")], k = 4)
+knn_list <- knn2nb(knn_weights)
+knn_weights_matrix <- nb2listw(knn_list, style = "W")
+
+# Moran's I test 
+moran_test <- moran.test(mod_resid, knn_weights_matrix)  
+
+result_figure(selected_model_q2)
+result_table(selected_model_q2)
+
+```
+
+Moran's test p value:`r round(moran_test$p.value,4)` - still residual
+autocorrelation

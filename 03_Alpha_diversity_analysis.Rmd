@@ -1,0 +1,400 @@
+---
+title: "Alpha-diversity"
+output: html_document
+date: "2025-06-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+## Load packages
+if(!require(tidyverse)) install.packages(tidyverse)
+if(!require(brms)) install.packages(brms)
+if(!require(patchwork)) install.packages(patchwork)
+if(!require(lme4)) install.packages(lme4)
+if(!require(easystats)) install.packages("easystats")
+if(!require(MuMIn)) install.packages("MuMin")
+if (!require(ggnewscale)) install.packages("ggnewscale")
+
+## Load data
+ecoreg <- readRDS( "outputs/Ecoregions_emep_grid.rds")
+globnut <- readRDS("outputs/02_GlobNut_subsampled.rds") %>% 
+  ungroup() %>% 
+  mutate(biomass = log(biomass),
+         spec_ric = log(spec_ric + 1),
+         q1 = log(q1 + 1),
+         q2 = log(q2 + 1),
+         ndep = log(ndep/100/5), # to g/ha/yr
+         ndep_cent = ndep - mean(ndep),
+         MAP = log(MAP),
+         PET = PET,
+         NP = log(NP),
+         MAP_cent = MAP - mean(MAP),
+         PET_cent = PET - mean(PET, na.rm = TRUE),
+         MAT_cent = MAT - mean(MAT),
+         NP_cent = NP - mean(NP),
+         biomass_cent = biomass - mean(biomass)) %>% 
+  mutate(across(c("ndep", "NP", "MAT", "MAP", "PET", "biomass", "pH_soilgrids"), ~scale(.x)[,1],  .names = "{.col}_scaled")) %>% 
+  left_join(ecoreg, by = "cell") %>% 
+  drop_na(pH_soilgrids)
+
+hab_label_table <- read.csv("~/Data/Globnut_offline/_GLOBNUT1.0/Globnut1.0_EUNIS.csv") %>% 
+  dplyr::select(habitat = sub_class, eunis_label2) %>% 
+  distinct()
+
+# colors
+colours_lim <- c('#d95f02','#1b9e77', '#7570b3')
+np_mean <- mean(globnut$NP) 
+np_sd <- sd(globnut$NP)
+np_vals <- (log(c(5,15,20))-np_mean)/np_sd # NP values to predict on 
+unstand_np <- function (x) { x*sd(globnut$NP) + mean(globnut$NP)}
+count_limits <- c(0,50) # color scale density annotation plot counts
+stand_plot <- 10 # plot size to adjust prediction to
+unstand_ndep <- function (x) { x*sd(globnut$ndep) + mean(globnut$ndep)}
+unstand_biomass <- function (x) { x*sd(globnut$biomass) + mean(globnut$biomass)}
+```
+
+## Biomass
+```{r}
+full_model_biomass <- lmer(biomass ~ MAT_scaled + PET_scaled + MAP_scaled +  
+                             NP_scaled + ndep_scaled + NP_scaled:ndep_scaled + 
+                             (1 + ndep_scaled |habitat) + (1|dg_cell), data = globnut, na.action = "na.fail")
+
+summary(full_model_biomass)
+check_model(full_model_biomass)
+
+# Run model selection
+dd <- dredge(
+  full_model_biomass,
+  subset = ndep_scaled & NP_scaled,  # Always include focal variable
+  rank = "AICc"
+)
+
+selected_models_biomass <- subset(dd, delta <= 2)
+
+selected_model_biomass <- lmer(get.models(dd,1)[[1]],
+                          data = globnut)
+summary(selected_model_biomass)
+check_model(selected_model_biomass)
+```
+
+```{r}
+# plot annotation
+biomass_limits <- c(0, 1000) 
+
+# Ndepostion effect on biomass by stoichiometry
+biomass_pred <- 
+  ggeffects::ggpredict(selected_model_biomass,
+                                 terms = c("ndep_scaled [all]", "NP_scaled [np_vals]")) %>% 
+  as.data.frame() %>% 
+  mutate(group = unstand_np(as.numeric(as.character(group))) %>% exp() %>% round() %>% as.factor()) 
+biomass_ndep_np <- ggplot(data = globnut, aes(x = exp(ndep), y = exp(biomass))) +
+    geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = biomass_pred, aes(x =  exp(unstand_ndep(x)), 
+                                     y = exp(predicted), 
+             fill = group, col = group, ymin = exp(conf.low), 
+             ymax = exp(conf.high)), alpha = .5, col = NA) +
+    geom_line(data = biomass_pred, aes(x =  exp(unstand_ndep(x)), 
+                                     y = exp(predicted), col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
+    scale_y_continuous(Biomass~(g~m^-2), limits = biomass_limits) +
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
+                     breaks = c(1,2,5,10,20,60),
+                     labels = c(1,2,5,10,20,60)) +
+  theme_bw() 
+biomass_ndep_np
+```
+## q0
+```{r}
+full_model_q0 <- lmer(spec_ric ~ MAT_scaled + PET_scaled + MAP_scaled + pH_soilgrids_scaled + log(plot_size) +
+                             NP_scaled +  ndep_scaled + I(ndep_scaled^2) + ndep_scaled:NP_scaled + 
+                        biomass_scaled + I(biomass_scaled^2) + (1 + ndep_scaled + I(ndep_scaled^2)| habitat) + (1|dg_cell),
+                      data = globnut, na.action = "na.fail")
+
+summary(full_model_q0)
+check_model(full_model_q0)
+
+# Run model selection
+dd <- dredge(
+  full_model_q0,
+  subset = ndep_scaled & NP_scaled,  # Always include focal variables
+  rank = "AICc")
+
+selected_models_q0 <- subset(dd, delta <= 2)
+
+selected_model_q0 <- lmer(get.models(dd,1)[[1]],
+                          data = globnut)
+check_convergence(selected_model_q0)
+isSingular(selected_model_q0)
+summary(selected_model_q0)
+check_model(selected_model_q0)
+```
+
+```{r}
+## calculate optimum ndep level for different levels of np
+# calculate confidence interval by bootstrapping
+set.seed(123)
+nrep <- 1000
+optimum_ndep <- matrix(ncol = length(np_vals), nrow = nrep)
+for (i in 1:nrep) {
+  random_sample <- globnut[sample(1:nrow(globnut), size = round(nrow(globnut)*0.7)),] # run on 70% of the data
+  mod_output <- lmer(formula(selected_model_q0),
+                          data = random_sample)
+  ndep_coef <- fixef(mod_output)["ndep_scaled"]
+  ndep2_coef <- fixef(mod_output)["I(ndep_scaled^2)"]
+  np_ndep_coef <- fixef(mod_output)["ndep_scaled:NP_scaled"]
+  optimum_ndep[i,] <- -(ndep_coef + np_ndep_coef * np_vals) / 
+    (2 *   ndep2_coef)
+}
+estimated_optimum <- data.frame(NP_scaled = np_vals,
+                              ndep_scaled = apply(optimum_ndep, 2, median) ,
+                              ci_low = apply(optimum_ndep, 2, quantile,  
+                                             probs = 0.025),
+                              ci_up = apply(optimum_ndep, 2, quantile,  
+                                            probs = 0.975)) %>% 
+  mutate(group = unstand_np(as.numeric(as.character(NP_scaled))) %>% exp() %>% round() %>% as.factor()) 
+
+# plot annotation
+q0_limits <- c(0, 75) 
+specric_optimum <- c(40,42,45)
+
+# Ndepostion effect on q0 by stoichiometry
+q0_pred <- 
+  ggeffects::ggpredict(selected_model_q0,
+                                 terms = c("ndep_scaled [all]",
+                                           "NP_scaled [np_vals]")) %>% 
+  as.data.frame() %>% 
+  mutate(group = unstand_np(as.numeric(as.character(group))) %>% exp() %>% round() %>% as.factor()) 
+q0_ndep_np <- ggplot(data = globnut, aes(x = exp(ndep), y = exp(spec_ric))) +
+    geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", 
+                        limits = count_limits) +
+  new_scale_fill() + 
+     geom_errorbar(data = estimated_optimum, 
+               aes(x = exp(unstand_ndep(ndep_scaled)),
+                   xmin = exp(unstand_ndep(ci_low)), 
+                   xmax = exp(unstand_ndep(ci_up)),
+                   y = specric_optimum)) +
+    geom_point(data = estimated_optimum, 
+               aes(x = exp(unstand_ndep(ndep_scaled)),
+                   y = specric_optimum,
+                   fill = group),
+               size = 1.5, shape = 21) +
+    guides(fill = "none") +
+    scale_fill_manual("N/P", values = colours_lim) +
+    new_scale_fill() + 
+    geom_ribbon(data = q0_pred, aes(x = exp(unstand_ndep(x)), 
+                                     y = exp(predicted), 
+             fill = group, col = group, ymin = exp(conf.low), 
+             ymax = exp(conf.high)), alpha = .5, col = NA) +
+    geom_line(data = q0_pred, aes(x = exp(unstand_ndep(x)), 
+                                     y = exp(predicted), col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
+    scale_y_continuous("Species richness (q0)", limits = q0_limits) +
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
+                     breaks = c(1,2,5,10,20,60),
+                     labels = c(1,2,5,10,20,60)) +
+  theme_bw() 
+q0_ndep_np
+
+q0_np_biomass <- ggeffects::ggpredict(selected_model_q0, 
+                                          terms = c("biomass_scaled [all]", 
+                                                    "NP_scaled [np_vals]", 
+                                                    "plot_size [stand_plot]"))  %>%
+    as.data.frame() %>% 
+    mutate(group = unstand_np(as.numeric(as.character(group))) %>% 
+             exp() %>% round() %>% as.factor())
+q0_np_biomass <-           
+   ggplot(data = globnut, aes(x = exp(biomass), y = exp(spec_ric))) +
+    geom_hex() +
+    scale_fill_gradient("Count", low = "grey90", high = "grey40",  limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = q0_np_biomass, aes(x = exp(unstand_biomass(x)), 
+                                     y = exp(predicted), 
+             fill = group,  ymin = exp(conf.low), 
+             ymax = exp(conf.high)), col = NA, alpha = .5) +
+    geom_line(data = q0_np_biomass, aes(x =  exp(unstand_biomass(x)), 
+                                     y = exp(predicted), col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
+    scale_y_continuous("Species richness (q0)", limits = q0_limits) +
+    scale_x_log10(Biomass~(g~m^-2)) +
+  theme_bw()
+q0_np_biomass
+
+```
+
+
+```{r}
+## calculate optimum ndep level for different levels of np for the habitats
+# calculate confidence interval by bootstrapping
+optimum_results <- list()
+habs <- c("R1","R2","R3")
+for(j in 1:length(np_vals)) {
+  optimum_results[[j]] <- matrix(NA, nrow =  length(habs), ncol = nrep)
+}
+for (i in 1:nrep) {
+  for (j in 1:length(np_vals)) {
+  random_sample <- globnut[sample(1:nrow(globnut), size = round(nrow(globnut)*0.7)),] # run on 70% of the data
+  mod_output <- lmer(formula(selected_model_q0),
+                          data = random_sample)
+  ndep_coef <- fixef(mod_output)["ndep_scaled"] + ranef(mod_output)$habitat[habs, "ndep_scaled"]
+  ndep2_coef <- fixef(mod_output)["I(ndep_scaled^2)"] + ranef(mod_output)$habitat[habs, "I(ndep_scaled^2)"]
+  np_ndep_coef <- fixef(mod_output)["ndep_scaled:NP_scaled"]
+  optimum_results[[j]][,i] <- -(ndep_coef + np_ndep_coef * np_vals[j]) / 
+    (2 *   ndep2_coef)
+  }
+}
+estimated_optimum_hab <- lapply(1:length(optimum_results), function(j) {
+  data.frame(NP_scaled = np_vals[j],
+             habitat = habs,
+             ndep_scaled = apply(optimum_results[[j]], 1, median) ,
+             ci_low = apply(optimum_results[[j]], 1, quantile, probs = 0.025), 
+             ci_up = apply(optimum_results[[j]], 1, quantile, probs = 0.975))}) %>% 
+  bind_rows() %>% 
+  mutate(group = unstand_np(as.numeric(as.character(NP_scaled))) %>% 
+           exp() %>% round() %>% as.factor())
+
+pred_data_hab <- 
+ ggeffects::ggpredict(selected_model_q0,
+                                 terms = c("ndep_scaled [all]", "NP_scaled [np_vals]", "habitat [habs]"),
+                      type = "random") %>% 
+  as.data.frame() %>% 
+  mutate(group = unstand_np(as.numeric(as.character(group))) %>% 
+           exp() %>% round() %>% as.factor())
+
+plot_hab <- function(hab_name, plot_title) {
+  ggplot(data = globnut[globnut$habitat == hab_name,], aes(x = exp(ndep), y = exp(spec_ric))) +
+    geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", 
+                        limits = count_limits) +
+    new_scale_fill() + 
+    geom_errorbar(data = estimated_optimum_hab[estimated_optimum_hab$habitat == hab_name,],
+               aes(x = exp(unstand_ndep(ndep_scaled)),
+                   y = c(60,62,65),
+                   xmin = exp(unstand_ndep(ci_low)),
+                   xmax = exp(unstand_ndep(ci_up)))) +
+    geom_point(data = estimated_optimum_hab[estimated_optimum_hab$habitat == hab_name,], 
+               aes(x = exp(unstand_ndep(ndep_scaled)),
+                   y = c(60,62,65),
+                   fill = group ),
+               size = 1.5, shape = 21) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    guides(fill = "none") +
+    new_scale_fill() + 
+    geom_ribbon(data = pred_data_hab[pred_data_hab$facet == hab_name,], 
+                aes(x = exp(unstand_ndep(x)), 
+                                     y = exp(predicted), 
+             fill = group, col = group, ymin = exp(conf.low), 
+             ymax = exp(conf.high)), alpha = .5, col = NA) +
+    geom_line(data = pred_data_hab[pred_data_hab$facet == hab_name,],
+              aes(x = exp(unstand_ndep(x)), y = exp(predicted), col = group)) +
+    scale_fill_manual("N/P", values = colours_lim) +
+    scale_color_manual("N/P", values = colours_lim) +
+    scale_y_continuous("Species richness (q0)", limits = q0_limits) +
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), trans = "log",
+                     breaks = c(1,2,5,10,20,60),
+                     labels = c(1,2,5,10,20,60)) +
+  ggtitle(plot_title) +
+  theme_bw()
+}
+q0_r1 <- plot_hab("R1", "R1: Dry grasslands")
+q0_r2 <- plot_hab("R2", "R2: Mesic grasslands")
+q0_r3 <- plot_hab("R3", "R3: Seasonally wet and\nwet grasslands")
+q0_u3 <- plot_hab("U3", "U3: Inland cliffs, rockpavements\nand outcrops")
+q0_q2 <- plot_hab("Q2", "Q2: Valley mires, poor fens\nand transition mires")
+q0_q5 <- plot_hab("Q5", "Q5: Helophyte beds")
+
+```
+
+```{r}
+(biomass_ndep_np | q0_ndep_np | q0_np_biomass) + 
+  plot_layout(guides = 'collect') + plot_annotation(tag_levels = 'a') &
+  theme(legend.position = "bottom", text = element_text(size = 8))
+ggsave("figures/Files_Ton/Resubmission/fig3.pdf", 
+       dpi = 300, width = 8, height = 3)
+ggsave("figures/Files_Ton/Resubmission/fig3.png",  
+       dpi = 300, width = 8, height = 3)
+
+(q0_r1 | q0_r2 | q0_r3)  + 
+  plot_layout(axes = "collect", guides = 'collect') + plot_annotation(tag_levels = 'a') &
+  theme(legend.position = "bottom", text = element_text(size = 8))
+ggsave("figures/Files_Ton/Resubmission/fig3-habitats.pdf", 
+       dpi = 300, width = 8, height = 3)
+ggsave("figures/Files_Ton/Resubmission/fig3-habitats.png",  
+       dpi = 300, width = 8, height = 3)
+```
+
+```{r}
+#biomass
+model_parameters(selected_model_biomass) %>% 
+  filter(Effects == "fixed") %>% 
+  mutate(Parameter = str_remove(Parameter, "_scaled") %>%  
+           str_remove("I\\(") %>% str_remove( "\\)") %>% str_remove("\\("),
+         Parameter = case_when(Parameter == "ndep" ~ "N deposition (log)",
+                               Parameter == "NP" ~ "N/P (log)",
+                               TRUE ~ Parameter)) %>% 
+  as.data.frame() %>% 
+  # Combine coefficient and SE
+  mutate(`Estimate (SD)`= paste0(round(Coefficient, 3), " (", round(SE, 3), ")"),
+       # Combine CI
+       CI = paste0("[", round(CI_low, 3), ", ", round(CI_high, 3), "]"),
+     `Significance level` = case_when(
+       p < 0.001 ~ "***",
+                    p < 0.01 ~ "**",
+                    p < 0.05 ~ "*",
+                    TRUE ~ ""),
+        `p-value` = case_when(p < 0.001 ~ "<0.001",
+                              TRUE ~ as.character(round(p,4)))) %>% 
+  dplyr::select(Parameter, `Estimate (SD)`, CI, `p-value`, `Significance level`) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          `Estimate (SD)` = c(round(r2(selected_model_biomass)$R2_conditional, 3),
+                          round(r2(selected_model_biomass)$R2_marginal,3)) %>% as.character()) %>%
+  replace_na(list(`Estimate (SD)` = "-", CI = "-", `p-value` = "-", `Significance level` = "-")) %>% 
+
+  knitr::kable(caption = "Model output biomass")
+
+
+#q0
+model_parameters(selected_model_q0) %>% 
+  filter(Effects == "fixed") %>% 
+  mutate(Parameter = str_remove(Parameter, "_scaled") %>%  
+           str_remove("I\\(") %>% str_remove( "\\)") %>% str_remove("\\("),
+         Parameter = case_when(Parameter == "ndep" ~ "N deposition (log)",
+                               Parameter == "ndep^2" ~ "N deposition^2 (log)",
+                               Parameter == "biomass" ~ "Biomass (log)",
+                               Parameter == "biomass^2" ~ "Biomass^2 (log)",
+                               Parameter == "logplot_size" ~ "Plot size (log)",
+                               Parameter == "MAP" ~ "MAP (log)",
+                               Parameter == "ndep:NP_scaled" ~ "N deposition:N/P",
+                               Parameter == "NP" ~ "N/P (log)",
+                               TRUE ~ Parameter)) %>% 
+  as.data.frame() %>% 
+  # Combine coefficient and SE
+  mutate(`Estimate (SD)`= paste0(round(Coefficient, 3), " (", round(SE, 3), ")"),
+       # Combine CI
+       CI = paste0("[", round(CI_low, 3), ", ", round(CI_high, 3), "]"),
+     `Significance level` = case_when(
+       p < 0.001 ~ "***",
+                    p < 0.01 ~ "**",
+                    p < 0.05 ~ "*",
+                    TRUE ~ ""),
+        `p-value` = case_when(p < 0.001 ~ "<0.001",
+                              TRUE ~ as.character(round(p,4)))) %>% 
+  dplyr::select(Parameter, `Estimate (SD)`, CI, `p-value`, `Significance level`) %>% 
+  add_row(Parameter = c("Conditional R2", "Marginal R2"),
+          `Estimate (SD)` = c(round(r2(selected_model_q0, tolerance = 1e-07)$R2_conditional, 3),
+                          round(r2(selected_model_q0,tolerance = 1e-07)$R2_marginal,3)) %>% as.character()) %>%
+  replace_na(list(`Estimate (SD)` = "-", CI = "-", `p-value` = "-", `Significance level` = "-")) %>% 
+
+  knitr::kable(caption = "Model output q-0")
+
+```
+

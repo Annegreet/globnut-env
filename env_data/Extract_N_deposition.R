@@ -31,11 +31,11 @@ if (!require(rnaturalearth)) install.packages("rnaturalearth")
 if (!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
 
 ## EMEP data (europe/russia) ----
-if (1) {
+if (0) {
 ## Download EMEP data (only need to do this once!) https://www.emep.int/mscw/mscw_moddata.html
   # The NetCDF files have the following convention:
   #   {GRID}_{MODEL VERSION}_{TIME RESOLUTION}.{YEAR}met_{EMISSION YEAR}emis_({REPORTING YEAR}).nc
-globnut_dir <- "Z:/geo_data/EMEP/Data_EMEP_report2023/"
+globnut_dir <- "Z:/Organized-globnut/Geo-data/EMEP/Data_EMEP_report2023/"
 years <- 1990:2020
 emep_urls <- paste0("https://thredds.met.no/thredds/fileServer/data/EMEP/2023_Reporting/EMEP01_rv5.0_year.",
                     years, "met_", years,"emis_rep2023.nc") # EMEP is available from 1990-2020 on a yearly, monthly, daily and hourly resolution. Here yearly is dowloaded for last 10 year
@@ -68,23 +68,23 @@ lat <- ncvar_get(emep_2020, "lat")
 lon <- ncvar_get(emep_2020, "lon")
 
 # europe shapefiles
-country <- c("Albania","Aland","Andorra","Austria","Belgium","Bulgaria",
-             "Bosnia and Herzegovina","Belarus","Switzerland","Czech Republic",
-             "Germany","Denmark","Spain","Estonia","Finland","France","Faroe Islands",
-             "United Kingdom","Guernsey","Greece","Croatia","Hungary","Isle of Man",
-             "Ireland","Iceland","Italy","Jersey","Kosovo","Liechtenstein","Lithuania",
-             "Luxembourg","Latvia","Monaco","Moldova","Macedonia","Malta","Montenegro",
-             "Netherlands", "The Netherlands", "Norway","Poland","Portugal","Romania","Russia","San Marino",
-             "Republic of Serbia","Slovakia","Slovenia","Sweden","Ukraine","Vatican")
-# fix geometry of Russia (sf_use_s2() must be FALSE for this)
-sf::sf_use_s2(FALSE)
-europe <- ne_countries(scale = "medium", continent = "Europe", 
-                       country = country,
-                       returnclass = "sf") %>% 
-  st_make_valid() %>% 
-  # crop to extent of Europe
-  st_crop(., c(xmin = min(lon), ymin = min(lat), xmax = max(lon), ymax = max(lat)))
-sf::sf_use_s2(TRUE) # back to default
+# country <- c("Albania","Aland","Andorra","Austria","Belgium","Bulgaria",
+#              "Bosnia and Herzegovina","Belarus","Switzerland","Czech Republic",
+#              "Germany","Denmark","Spain","Estonia","Finland","France","Faroe Islands",
+#              "United Kingdom","Guernsey","Greece","Croatia","Hungary","Isle of Man",
+#              "Ireland","Iceland","Italy","Jersey","Kosovo","Liechtenstein","Lithuania",
+#              "Luxembourg","Latvia","Monaco","Moldova","Macedonia","Malta","Montenegro",
+#              "Netherlands", "The Netherlands", "Norway","Poland","Portugal","Romania","Russia","San Marino",
+#              "Republic of Serbia","Slovakia","Slovenia","Sweden","Ukraine","Vatican")
+# # fix geometry of Russia (sf_use_s2() must be FALSE for this)
+# sf::sf_use_s2(FALSE)
+# europe <- ne_countries(scale = "medium", continent = "Europe", 
+#                        country = country,
+#                        returnclass = "sf") %>% 
+#   st_make_valid() %>% 
+#   # crop to extent of Europe
+#   st_crop(., c(xmin = min(lon), ymin = min(lat), xmax = max(lon), ymax = max(lat)))
+# sf::sf_use_s2(TRUE) # back to default
 
 ## Read and stack N deposition from EMEP grid
 # nitrogen oxides NOx(NO2+NO) (dry)
@@ -337,11 +337,11 @@ dnhx_2020 <- raster(nhx_raster$X2020)
 wnox_2020 <- raster(wnox_raster$X2020)
 wnhx_2020 <- raster(wnhx_raster$X2020)
 # cumulative
-ndep_emep <- calc(stack(dnox_2020, dnhx_2020,wnox_2020,wnhx_2020), sum) * 0.01  # tp g/ha
+ndep_emep <- calc(stack(dnox_2020, dnhx_2020,wnox_2020,wnhx_2020), sum) * 0.01  # tp kg/ha
 # ndep_emep <- raster::aggregate(ndep_emep, fact =5, fun = mean)
 plot(ndep_emep)
 # global
-ndep_global <- calc(stack(raster(glob_nhx), raster(glob_nox)), sum ) * 0.01 # to g/ha
+ndep_global <- calc(stack(raster(glob_nhx), raster(glob_nox)), sum ) * 0.01 # to kg/ha
 plot(ndep_global)
 
 # combine emep and ackerman
