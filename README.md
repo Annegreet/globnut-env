@@ -6,17 +6,15 @@ This repo contains the code for the article "Nutrient stoichiometry mediates nit
 
 `/env_data` contains the scripts to extract and process environmental data for analysis. The repo `/env_data/outputs` contains the data produced by these scripts.
 
--   `Extract_geology.R` - for computing the rock acidity variable
-
--   `Extract_glacial_extent.R`  - for computing the soil age variable
-
 -   `Extract_N_deposition.R` - to calculate the N deposition variable and fig. 1b
+
+-   `Extract_DEM.R` - to extract elevation from DEM
 
 ## Preparing data
 
 -   `01_Gridding_globnut.R` - to create the grid for random effects and sub-sampling
 
--    `01_Species_diversity_indices.R` - to calculate species diversity indices
+-   `01_Species_diversity_indices.R` - to calculate species diversity indices
 
 -   `02_Plot_selection.R` - compiles data set for analysis and performs sub-sampling
 
@@ -28,9 +26,9 @@ Note: figures in manuscripts are post-processed in Adobe Illustrator, so figures
 
 -   `03_SEM_GlobNut.R` - produces SEM, displayed in fig 2 and supplementary information fig. 1.3
 
--   `03_Linear_mixed_models.Rmd` - linear mixed modelling, fig 3 and supplementary information fig. S2.1 and tables 2.1-2.4
+-   `03_Alpha_diversity_analysis.Rmd` - linear mixed modelling, fig 3 and supplementary information fig. S2.1 and tables 2.1-2.4
 
--   `03_Zi_Beta_regression.Rmd`  - calculates distance metrics, runs zero-inflated beta regression, produces fig. 4
+-   `03_Beta_diversity_analysis.Rmd`  - iNEXT beta diversity estimation, linear mixed modelling  and produces fig. 4
 
 Data to run these scripts is available at: <https://osf.io/pgxrt/>
 
