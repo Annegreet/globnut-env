@@ -35,10 +35,6 @@ plot_coo <-  globnut[,c("plot_ID", "lat", "lon")]
 
 plot_coo <-  as.data.frame(sapply(plot_coo, as.numeric))
 
-#deletes all erroneous coordinates (should ideally be none)
-plot_coo <-  plot_coo[which(plot_coo$lat > -90 & plot_coo$lat < 90),]
-plot_coo <-  plot_coo[which(plot_coo$lon > -180 & plot_coo$lon < 180),]
-
 #First, create two empty cols
 plot_coo$lat_DEM <-  NA
 plot_coo$lon_DEM <-  NA
@@ -136,48 +132,6 @@ hgt <- bind_rows(hgt_list) %>%
                 orig_res, data_url, data_citation)
 saveRDS(hgt, "GlobNut_Env_var/Outputs/NASA_elevation.rds")
 
-# # Terrain variables
-# ter_list <- list()
-# for(i in 1:length(dem_names)){
-#   ter <- unzipped_files %>% 
-#     # filter and relevant raster
-#     str_subset(., pattern = dem_names[i]) %>% 
-#     rast(.) %>% 
-#     # calculate terrain variables in spatraster format
-#     terra::terrain(., v = c("slope", "aspect", "TRI"), unit = "degrees",
-#                    neighbors = 8 ) %>% 
-#     # calculate terrain variable
-#     terra::extract(x = ., y = plot_coo[plot_coo$dem_file == dem_names[i], c("lon","lat")]) %>% 
-#     dplyr::select(-1)
-#   # add plot_id, lat and lon
-#   ter$plot_ID <- plot_coo$plot_ID[plot_coo$dem_file == dem_names[i]]
-#   ter$lat <- plot_coo$lat[plot_coo$dem_file == dem_names[i]]
-#   ter$lon <- plot_coo$lon[plot_coo$dem_file == dem_names[i]]
-#   # append to list
-#   ter_list[[length(ter_list)+1]] <- ter
-# }
-# 
-# var_desc <- data.frame(var_name = c("slope", "aspect", "TRI"),
-#                        unit = c("degrees", "degrees", NA),
-#                        description = c("Slope based on 8 neighboring cells, terra terrain function",
-#                                        "Aspect based on 8 neighboring cells, terra terrain function",
-#                                        "Terrain Ruggedness Index, mean of differences between 8 neighboring cells, terra terrain function"))
-# ter <- bind_rows(ter_list) %>% 
-#   # add NA values for missing observations
-#   right_join(globnut[,c("plot_ID","lat", "lon")], by = c("plot_ID","lat","lon")) %>% 
-#   pivot_longer(cols = slope:TRI, names_to = "var_name", values_to = "value") %>% 
-#   left_join(var_desc, by = "var_name") %>% 
-#   mutate(data_source = "NASA",
-#          data_url = "https://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/",
-#          data_citation = NA,
-#          orig_res = NA,
-#          obs_year = NA) %>% 
-#   # order columns
-#   dplyr::select(plot_ID, lat, lon, obs_year, var_name, value, unit, description, data_source, 
-#                 orig_res, data_url, data_citation) %>% 
-#   bind_rows(hgt)
-# 
-# base::saveRDS(ter, file = "GlobNut_Env_var/Outputs/NASA_topography.rds")
 
 # Arctic DEM ----
 # NASA DEM doesn't cover the polar region, use arcticDEM instead https://www.pgc.umn.edu/data/arcticdem/
@@ -259,57 +213,6 @@ hgt <- bind_rows(hgt_list) %>%
   dplyr::select(plot_ID, lat, lon, obs_year, var_name, value, unit, description, data_source, 
                 orig_res, data_url, data_citation)
 base::saveRDS(hgt, file = "GlobNut_Env_var/Outputs/ArcticDEM_elevation.rds")
-
-# Terrain for arctic dem not currently working properly - only retrieving 
-# ter_list <- list()
-# for(i in 1:length(mosaic_ID)){
-#   print(mosaic_ID[i])
-#   
-#   # convert globnut coordinate to espg:3413 
-#   globnut_vec <- mosaic_names[mosaic_names$tile == mosaic_ID[i], c("lon","lat")] %>%  
-#     vect(., crs = "EPSG:4326", geom=c("lon", "lat")) %>% 
-#     # project to EPSG:3413 from EPSG:4326
-#     terra::project(., "EPSG:3413") 
-# 
-#   ter <- unzipped_files %>% 
-#     # filter and relevant raster
-#     str_subset(., pattern = paste0("/", mosaic_ID[5])) %>% 
-#     rast(.) %>% 
-#     # calculate terrain variables in spatraster format
-#     terra::terrain(., v = c("slope", "aspect", "TRI"), unit = "degrees",
-#                    neighbors = 8 ) %>% 
-#     # calculate terrain variable
-#     terra::extract(x = ., y = globnut_vec) %>% 
-#     dplyr::select(-1)
-#   # add plot_id, lat and lon
-#   ter$plot_ID <- mosaic_names$plot_ID[mosaic_names$tile == mosaic_ID[i]]
-#   ter$lat <- mosaic_names$lat[mosaic_names$tile == mosaic_ID[i]]
-#   ter$lon <- mosaic_names$lon[mosaic_names$tile == mosaic_ID[i]]
-#   # append to list
-#   ter_list[[length(ter_list)+1]] <- ter
-# }
-# 
-# var_desc <- data.frame(var_name = c("slope", "aspect", "TRI"),
-#                        unit = c("degrees", "degrees", NA),
-#                        description = c("Slope based on 8 neighboring cells, terra terrain function",
-#                                        "Aspect based on 8 neighboring cells, terra terrain function",
-#                                        "Terrain Ruggedness Index, mean of differences between 8 neighboring cells, terra terrain function"))
-# ter <- bind_rows(ter_list) %>% 
-#   pivot_longer(cols = slope:TRI, names_to = "var_name", values_to = "value") %>% 
-#   filter(!is.na(value)) %>% 
-#   left_join(var_desc, by = "var_name") %>% 
-#   mutate(data_source = "ArcticDEM",
-#          var_name = "elev",
-#          unit = "m.a.s.l.", 
-#          description = "ArcticDEM extracted meters above sea level",
-#          data_url = "https://data.pgc.umn.edu/elev/dem/setsm/ArcticDEM/mosaic/latest/10m/",
-#          data_citation = "Porter, Claire; Morin, Paul; Howat, Ian; Noh, Myoung-Jon; Bates, Brian; Peterman, Kenneth; Keesey, Scott; Schlenk, Matthew; Gardiner, Judith; Tomko, Karen; Willis, Michael; Kelleher, Cole; Cloutier, Michael; Husby, Eric; Foga, Steven; Nakamura, Hitomi; Platson, Melisa; Wethington, Michael, Jr.; Williamson, Cathleen; Bauer, Gregory; Enos, Jeremy; Arnold, Galen; Kramer, William; Becker, Peter; Doshi, Abhijit; D’Souza, Cristelle; Cummens, Pat; Laurier, Fabien; Bojesen, Mikkel, 2018, “ArcticDEM”, https://doi.org/10.7910/DVN/OHHUKH, Harvard Dataverse, V1, [Date Accessed: 17-8-2023]",
-#          orig_res = "10 m",
-#          obs_year = NA) %>% 
-#   # order columns
-#   dplyr::select(plot_ID, lat, lon, obs_year, var_name, value, unit, description, data_source, 
-#                 orig_res, data_url, data_citation) %>% 
-#   bind_rows(hgt)
 
 
 ## Compile results NASA and arctic DEM

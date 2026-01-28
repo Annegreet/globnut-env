@@ -52,8 +52,6 @@ names(file_names) <- c(years, 2021, 2022)
 ## Load data
 # globnut coordinates
 globnut <- read.csv("Z:/_GLOBNUT1.0/GlobNut1.0_metadata.csv") %>% 
-  dplyr::filter(between(lat, 35, 75)) %>% 
-  dplyr::filter(between(lon, -25, 150)) %>% 
   dplyr::select(plot_ID, lon, lat) %>%
   na.omit()
 
@@ -63,6 +61,7 @@ emep_2020 <- nc_open(file_names["2020"])
 emep_meta <- NetCDF(file_names["2020"])
 # plot(emep_meta)
 print(emep_2020) # check layers in file
+
 # latitude and longitude of the EMEP grid
 lat <- ncvar_get(emep_2020, "lat") 
 lon <- ncvar_get(emep_2020, "lon")
@@ -108,24 +107,24 @@ wnhx_raster <- stack(as.list(file_names),
   rast()
 
 
-# plot raster
-nox_raster %>% 
-  as.data.frame(., xy = T) %>% 
-  pivot_longer(cols = X1990:X2022, names_to = "year", values_to = "DDEP_OXN_m2Grid") %>% 
-  ggplot() +
-  geom_raster(aes(x = x, y = y, fill = DDEP_OXN_m2Grid)) +
-  geom_sf(data = europe, alpha = 0.5) +
-  scale_fill_viridis_c(trans = "log") +
-  facet_wrap(~year)
-
-nhx_raster %>% 
-  as.data.frame(., xy = T) %>% 
-  pivot_longer(cols = X1990:X2022, names_to = "year", values_to = "DDEP_RDN_m2Grid") %>% 
-  ggplot() +
-  geom_raster(aes(x = x, y = y, fill = DDEP_RDN_m2Grid)) +
-  geom_sf(data = europe, alpha = 0.5) +
-  scale_fill_viridis_c(trans = "log") +
-  facet_wrap(~year)
+# # plot raster
+# nox_raster %>% 
+#   as.data.frame(., xy = T) %>% 
+#   pivot_longer(cols = X1990:X2022, names_to = "year", values_to = "DDEP_OXN_m2Grid") %>% 
+#   ggplot() +
+#   geom_raster(aes(x = x, y = y, fill = DDEP_OXN_m2Grid)) +
+#   geom_sf(data = europe, alpha = 0.5) +
+#   scale_fill_viridis_c(trans = "log") +
+#   facet_wrap(~year)
+# 
+# nhx_raster %>% 
+#   as.data.frame(., xy = T) %>% 
+#   pivot_longer(cols = X1990:X2022, names_to = "year", values_to = "DDEP_RDN_m2Grid") %>% 
+#   ggplot() +
+#   geom_raster(aes(x = x, y = y, fill = DDEP_RDN_m2Grid)) +
+#   geom_sf(data = europe, alpha = 0.5) +
+#   scale_fill_viridis_c(trans = "log") +
+#   facet_wrap(~year)
 
 ## Extract N-deposition by globnut coordinate
 #NOX
@@ -154,7 +153,6 @@ tot_nox <- bind_rows(dry = nox_globnut, wet = wnox_globnut, .id = "type") %>%
   dplyr::select(plot_ID, lat, lon, obs_year, var_name, value, unit, description, data_source, 
          orig_res, data_url, data_citation)
 saveRDS(tot_nox, file = "env_data/outputs/EMEP_NOxdeposition.rds")
-saveRDS(tot_nox, file = "env_data/outputs/EMEP_NOxdeposition.rds")
 #NHx
 # dry deposition NHX
 nhx_globnut <- cbind(globnut[, c("plot_ID","lon","lat")], 
@@ -182,81 +180,49 @@ tot_nhx <- bind_rows(dry = nhx_globnut, wet = wnhx_globnut, .id = "type") %>%
          orig_res, data_url, data_citation)
 
 saveRDS(tot_nhx, file = "env_data/outputs/EMEP_NHxdeposition.rds")
-saveRDS(tot_nhx, file = "env_data/outputs/EMEP_NHxdeposition.rds")
 }
 
-# Supplement missing values with global nitrogen data from Ackerman etal. (2019) ----
-if (1) {
+# Supplement missing values with Zhu etal (2025) data ----
 # load in data
-tot_nhx <- readRDS("env_data/outputs/EMEP_NHxdeposition.rds")
-tot_nox <- readRDS("env_data/outputs/EMEP_NOxdeposition.rds")
-glob_ndep <- read.csv("Z:/geo_data/Global_n_deposition/oxidized_reduced_N_deposition(1).csv") 
+file_names <- list.files("Z:/Organized-globnut/Geo-data/Global_N_deposition_grid_dataset_2008_2020/", full.names = TRUE) %>% 
+  str_subset(., pattern = "totN_")
+ndep_raster <- rast(file_names)
+ndep_raster_4326 <- project(ndep_raster, "EPSG:4326")
 
-# convert df to vector, then rasterize
-glob_ndep_vect <- glob_ndep %>% 
-  vect(geom = c("longitude","latitude"), crs = st_crs(4326)) 
-# create empty raster with extent and resolution of the data
-r <- rast(ext(glob_ndep_vect), ncol = n_distinct(glob_ndep$longitude), 
-          nrow = n_distinct(glob_ndep$latitude), crs = st_crs(4326)) 
-# oxidized N
-glob_nox <- terra::rasterize(glob_ndep_vect, r, "total_oxidized_2016") 
-plot(glob_nox)
-# reduced N
-glob_nhx <- terra::rasterize(glob_ndep_vect, r, "total_reduced_2016") 
-plot(glob_nhx)
 
-# # Get plot IDs for plots without data
-# no_data <- tot_nhx %>%
-#   filter(is.na(value)) %>%
-#   pull(plot_ID) %>%
-#   unique()
-# no_data <- meta %>%
-#   filter(plot_ID %in% no_data) %>%
-#   dplyr::select(plot_ID, lat, lon) %>%
-#   mutate(across(.cols = everything(), ~as.numeric(.))) %>%
-#   na.omit()
-
-# extract 
-glob_nox_plot <- cbind(globnut[, c("plot_ID","lon","lat")], terra::extract(x = glob_nox, y = globnut[, c("lon","lat")])) %>% 
-  rename(value = last) %>% 
-  mutate(obs_year = 2016,
-         var_name = "NOx_dep_glob",
-         data_source = "Ackerman et al 2019",
-         description = "wet and dry NOx deposition",
-         ID = NULL,
-         unit = "mg N/m2",
-         orig_res = "2x2.5 degree",
-         data_url = "https://conservancy.umn.edu/handle/11299/197613",
-         data_citation = "Ackerman, D., Millet, D. B., & Chen, X. (2019). Global estimates of inorganic nitrogen deposition across four decades. Global Biogeochemical Cycles, 33, 100–107. https://doi.org/10.1029/2018GB005990")
-glob_nhx_plot <- cbind(globnut[, c("plot_ID","lon","lat")], terra::extract(x = glob_nhx, y = globnut[, c("lon","lat")])) %>% 
-  rename(value = last) %>% 
-  mutate(obs_year = 2016,
-         var_name = "NHx_dep",
-         data_source = "Ackerman et al 2019",
-         description = "wet and dry NHx deposition",
-         ID = NULL,
-         unit = "mg N/m2",
-         orig_res = "2x2.5 degree",
-         data_url = "https://conservancy.umn.edu/handle/11299/197613",
-         data_citation = "Ackerman, D., Millet, D. B., & Chen, X. (2019). Global estimates of inorganic nitrogen deposition across four decades. Global Biogeochemical Cycles, 33, 100–107. https://doi.org/10.1029/2018GB005990")
-glob_ndep_plot <- bind_rows(glob_nox_plot, glob_nhx_plot)
-saveRDS(glob_ndep_plot, "env_data/outputs/Ackerman_ndeposition.rds")
+# fill in missing values
+ndep_filled <- list()
+for(i in 1:length(file_names)){
+  tobe_filled <- ndep_raster_4326[[i]]
+  tobe_filled[is.na(ndep_raster_4326[[i]])] <- terra::focal(ndep_raster_4326[[i]], w=3, fun=mean, na.rm=TRUE)[is.na(ndep_raster_4326[[i]])]
+  ndep_filled[[i]] <- tobe_filled
 }
+ndep_filled <- rast(ndep_filled)
+
+glob_ndep_zhu <- cbind(globnut[, c("plot_ID","lon","lat")], terra::extract(x = ndep_filled, y = globnut[, c("lon","lat")])) %>% 
+  pivot_longer(cols = mean_totN_2008_hm:mean_totN_2020_hm, names_to = "obs_year", values_to = "value") %>% 
+  group_by(plot_ID,lat,lon, obs_year) %>% 
+  mutate(obs_year = obs_year %>% str_remove(pattern = "mean_totN_") %>% str_remove(pattern = "_hm") %>% as.numeric(),
+         var_name = "N_dep_glob",
+         data_source = "Zhu et al 2015",
+         description = "Total N deposition",
+         ID = NULL,
+         unit = "kg N/ha/ye",
+         orig_res = "0.125x0.125 degree",
+         data_url = "https://doi.org/10.6084/m9.figshare.26778574.v1",
+         data_citation = "Zhu, Jianxing; Jia, Yanlong; Yu, Guirui (2025). Changing patterns of global nitrogen deposition driven by socio-economic development. figshare. Dataset. ")
 
 ## Calculate cummulative N-deposition per plot -----
 # load data
 nox <- readRDS("env_data/outputs/EMEP_NOxdeposition.rds")
 nhx <- readRDS("env_data/outputs/EMEP_NHxdeposition.rds")
 missing_emep <- nox %>% 
-  dplyr::filter(between(lat, 35, 75)) %>% 
-  dplyr::filter(between(lon, -25, 150)) %>% 
   filter(is.na(value)) %>% 
   pull(plot_ID) %>% 
   unique
-ack <- readRDS("env_data/outputs/Ackerman_ndeposition.rds") %>% 
+zhu <- glob_ndep_zhu %>% 
   # only plots not in emep data
-  filter(plot_ID %in% missing_emep) %>% 
-  mutate(obs_year = NA)
+  filter(plot_ID %in% missing_emep) 
 meta <- read.csv("Z:/_GLOBNUT1.0/GlobNut1.0_metadata.csv") %>% 
   # for the plots sampled in 1989, take the ndep observation from 1990
   mutate(year = ifelse(year == 1989, 1990, year))
@@ -275,15 +241,15 @@ for (i in 1:nrow(yr5)) {
 }
 yr5 <- bind_rows(l)
 
-## combining datasets of emep and ackerman
+
+## combining datasets of emep and zhu
 ndep <- bind_rows(nhx, nox) %>% 
   filter(!is.na(value)) %>% 
-  bind_rows(ack) %>% #add ackerman data
-  left_join(meta[,c("plot_ID","year")], by = "plot_ID") %>% # join with meta data for sample year 
-  mutate(obs_year = ifelse(is.na(obs_year), year, obs_year)) %>% # set to ackerman obs year to year of sampling
   # calculate total Ndep (Nox+nhx) by plot
-  group_by(plot_ID, obs_year) %>% 
-  summarise(ndep = sum(value, na.rm = TRUE) %>% na_if(0)) 
+  group_by(plot_ID, obs_year) %>%
+  summarise(ndep = sum(value, na.rm = TRUE) %>% na_if(0)) %>% 
+  mutate(ndep = ndep/100) %>% 
+  bind_rows(zhu %>% rename(ndep = value)) 
 
 ndep_5yr_imp <- yr5 %>% # years needed
   # available data
@@ -298,39 +264,16 @@ ndep_5yr_imp <- yr5 %>% # years needed
             sum_5yr = sum(ndep),
             n_obs_5yr = unique(n_obs)) 
 
-## 10 year sum
-yr10 <- meta[, c("plot_ID", "year")] %>% 
-  # calculate mean for 10 years prior sampling
-  mutate(start_year = year - 9, end_year = year, year = NULL) %>% 
-  na.omit()
-
-l <- list() # surely this can be done nicer than a loop?
-for (i in 1:nrow(yr10)) {
-  t <- expand.grid(plot_ID = yr10[i,]$plot_ID, obs_year = yr10[i,]$start_year:yr10[i,]$end_year)
-  l[[i]] <- t
-}
-yr10 <- bind_rows(l)
-
-# 10 year sum and average
-ndep_10yr_imp <- yr10 %>% # years needed
-  # available data
-  left_join(ndep, by = c("plot_ID", "obs_year")) %>%  
-  # impute missing 
-  group_by(plot_ID) %>% 
-  mutate(n_obs = sum(!is.na(ndep))) %>% # number of observations
-  fill(ndep, .direction = "updown") %>% 
-  summarise(mean_10yr = mean(ndep),
-            sd_10yr = sd(ndep),
-            sum_10yr = sum(ndep),
-            n_obs_10yr = unique(n_obs)) 
-
-ndep <- left_join(ndep_5yr_imp, ndep_10yr_imp, by = "plot_ID")
+ndep <- ndep_5yr_imp %>% 
+  mutate(data_source = ifelse(plot_ID %in% zhu$plot_ID, "Zhu", "EMEP"))
 
 # write to csv for globnut 1.0
-write.csv(ndep, "Z:/_GLOBNUT1.0/ndeposition.csv", row.names = FALSE,  fileEncoding = "UTF-8")
+write.csv(ndep, "Z:/_GLOBNUT1.0/ndeposition_EMEP_zhu.csv", row.names = FALSE,  fileEncoding = "UTF-8")
 
 
-## Base map for fig 1
+
+
+## Base map for fig 1 ----
 # EMEP
 dnox_2020 <- raster(nox_raster$X2020)
 dnhx_2020 <- raster(nhx_raster$X2020)
@@ -341,12 +284,12 @@ ndep_emep <- calc(stack(dnox_2020, dnhx_2020,wnox_2020,wnhx_2020), sum) * 0.01  
 # ndep_emep <- raster::aggregate(ndep_emep, fact =5, fun = mean)
 plot(ndep_emep)
 # global
-ndep_global <- calc(stack(raster(glob_nhx), raster(glob_nox)), sum ) * 0.01 # to kg/ha
+ndep_global <- raster(ndep_raster_4326$mean_totN_2020_hm)
 plot(ndep_global)
 
-# combine emep and ackerman
+# combine emep and zhu
 
-# crop and resample ackerman to resolution of emep
+# crop and resample zhu to resolution of emep
 ras_extent <- raster(xmn = 90, xmx = 150, ymn = 30, ymx = 82, res = raster::res(ndep_emep))
 resample_ndep <- raster::resample(ndep_global, ras_extent, method = "bilinear") 
 ndep_comb <- raster::merge(ndep_emep, resample_ndep)
@@ -368,16 +311,19 @@ r_df <- as.data.frame(ndep, xy = TRUE)
 colnames(r_df) <- c("x", "y", "value")
 
 r_df <- r_df %>%
-  mutate(category = cut(value, breaks = c(-Inf, 5, 15, 30, Inf),
-                        labels = c("< 5", "5-15", "15-30","> 30")))
+  mutate(category = cut(value, breaks = c(-Inf,5, 10, 15,20,25,30,35,40,45,50, Inf),
+                        labels = c("< 5","5-10", "10-15", "15-20","20-25","25-30",
+                                   "30-35","35-40","40-45","45-50","> 50")))
 
 ggplot(r_df, aes(x = x, y = y, fill = category)) +
   geom_raster() +
-  scale_fill_manual(values = c("< 5" = "grey90",
-                               "5-15" = "grey70",
-                               "15-30" = "grey50",
-                               "> 30" = "grey30"),na.translate = FALSE) +
+  scale_fill_grey(start = 0.9, end = 0.3, na.translate = FALSE) +
   labs(fill = "N deposition (kg ha-1) (2020)") +
   theme_minimal() +
   theme(legend.position = "right")
 ggsave("figures/Files_Ton/Base_map_ndep.pdf", dpi = 300)
+
+
+ggplot(data = ndep_raster_4326[[1]], aes(x = x, y = y, fill =mean_totN_2008_hm  )) +
+  geom_raster() +
+  geom_point(data=globnut, aes(x = lon,y=lat), col = "red", inherit.aes = FALSE)
