@@ -2,7 +2,7 @@
 ##
 ## Script name: 01_Gridding_globnut.R
 ##
-## Purpose of script: Gridding GlobNut database, reducing sampling bias
+## Purpose of script: Gridding GlobNut database for incorporating spatial effects
 ##
 ## Author: Annegreet Veeken
 ##

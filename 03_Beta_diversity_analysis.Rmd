@@ -2,50 +2,44 @@
 title: "03_Beta_diversity_analysis"
 author: "Annegreet Veeken"
 date: "`r Sys.Date()`"
-output:
-  word_document:
-    toc: true
-  html_document:
-    code_folding: hide
-    toc: true
-editor_options:
-  markdown:
-    wrap: 72
 ---
 
+Note: Figures in the manuscript have been post-processed in Adobe Illustratorso this script does not produce figures exactly as they appear in the manuscript
 ```{r setup}
 knitr::opts_chunk$set(
 	echo = FALSE,
 	message = FALSE,
 	warning = FALSE
 )
+
+## Load packages
+library(tidyverse)
+library(geosphere)
+library(easystats)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(lme4)
+library(spdep)
+library(sf)
+library(broom)
+library(MuMIn)
+library(patchwork)
+library(iNEXT.beta3D)
+library(terra)
+library(ggnewscale)
+library(spatialsample)
+library(rsample)
+
+set.seed(123)
 ```
 
-```{r}
-## Load packages
-if(!require(tidyverse)) install.packages(tidyverse)
-if(!require(geosphere)) install.packages(geosphere)
-if(!require(easystats)) install.packages(easystats)
-if(!require(rnaturalearth)) install.packages(rnaturalearth)
-if(!require(rnaturalearthdata)) install.packages(rnaturalearthdata)
-if(!require(lme4)) install.packages(lme4)
-if(!require(spdep)) install.packages(spdep)
-if(!require(sf)) install.packages(sf)
-if(!require(broom)) install.packages(broom)
-if(!require(MuMIn)) install.packages(MuMin)
-if(!require(patchwork)) install.packages(patchwork)
-if(!require(iNEXT.beta3D)) install.packages(iNEXT.beta3D)
-if(!require(terra)) install.packages(terra)
-
+## Preparing data
+```{r load-data}
 ## Load data
 dir <- "~/Data/Globnut_offline/_GLOBNUT1.0/"
 
 globnut <- readRDS("outputs/02_GlobNut.rds") %>% 
-  ungroup() %>% 
-  # dplyr::select(plot_ID, cell,cell_lon, cell_lat, habitat, lon, lat, sample_year,
-  #               ndep, MAP, MAT, PET, NP, biomass, elev) %>% 
-  # grouping for beta diversity is habitat by cell
-  mutate(cell_hab = paste(cell, habitat, sep = "_"))
+  ungroup() 
 spec_raw <- read.csv(paste0(dir, "GlobNut1.0_species.csv")) 
 spec <- spec_raw %>% 
   ungroup() %>% 
@@ -61,106 +55,18 @@ spec <- spec_raw %>%
   group_by(plot_ID) %>% 
   mutate(covertot = sum(cover), 
          cover = round(cover/covertot*100))  %>% 
-  left_join(globnut %>% dplyr::select(plot_ID, cell, habitat, cell_hab), by = "plot_ID") %>% 
-  drop_na(cell, habitat, cell_hab) %>% 
+  left_join(globnut %>% dplyr::select(plot_ID, cell), by = "plot_ID") %>% 
+  drop_na(cell) %>% 
   filter(cover > 0)
 
-set.seed(123)
-nobs <- 3
+
 ```
 
-```{r functions}
-result_figure <- function(mod) {
-  p <- mod %>% 
-   model_parameters() %>%   
-  filter(Effects == "fixed") %>% 
-  filter(!Parameter %in% c("(Intercept)", "distm")) %>% 
-  mutate(Parameter = case_match(Parameter,
-                "dif_np" ~ "Difference N/P",
-                "ndep" ~ "N deposition",
-                "mean_np" ~ "Mean N/P",
-                "dif_bio" ~ "Difference biomass",
-                "mean_bio" ~ "Mean biomass")) %>% 
-  ggplot(aes(y = Parameter, x = Coefficient)) +
-    geom_vline(aes(xintercept = 0)) +
-    geom_errorbar(aes(xmin = CI_low, xmax = CI_high),  width = 0.25) +
-  geom_point(shape = 21, size = 3, fill = "#a1d99b") +        
-  scale_x_continuous("Standardized effect") +
-  scale_y_discrete("") + 
-  theme_bw()+
-  theme(legend.position = "none")
-p
-}
 
-result_table <- function(mod){
-  tab <-  mod %>% 
-  model_parameters() %>%   
-  filter(Effects == "fixed") %>% 
-  mutate(Parameter = case_match(Parameter,
-                           "(Intercept)" ~ "Intercept",
-                "dif_np" ~ "Difference N/P",
-                "ndep" ~ "N deposition",
-                "mean_np" ~ "Mean N/P",
-                "dif_bio" ~ "Difference biomass",
-                "distm" ~ "Geographical distance",
-                "mean_bio" ~ "Mean biomass")) %>% 
-  # Combine coefficient and SE
-  mutate(`Estimate (SD)`= paste0(round(Coefficient, 3), " (", round(SE, 3), ")"),
-      # Combine CI
-      CI = paste0("[", round(CI_low, 3), ", ", round(CI_high, 3), "]"),
-      `Significance level` = case_when(
-        p < 0.001 ~ "***",
-                    p < 0.01 ~ "**",
-                    p < 0.05 ~ "*",
-                    TRUE ~ ""),
-      `p-value` = round(p, 4)) %>% 
-  select(Parameter, `Estimate (SD)`, CI, `p-value`, `Significance level`) %>% 
-  add_row(Parameter = c("Conditional R2", "Marginal R2"),
-          `Estimate (SD)` = c(round(r2(mod)$R2_conditional,3), round(r2(mod)$R2_marginal,3)) %>% as.character()) %>% 
-  knitr::kable()
-  return(tab)
-}
-```
-
-```{r ecoregions}
-
-# # Extract ecoregions for globnut
-# ecoregions <- terra::vect("~/Data/Ecoregions2017/Ecoregions2017.shp")
-# # terra::crs(ecoregions)
-# coords_df <- globnut %>%
-#   dplyr::select(cell, cell_lon, cell_lat) %>%
-#   distinct()
-# coords <- terra::vect(coords_df, geom = c("cell_lon", "cell_lat"),  crs = "EPSG:4326")
-# ecoreg_globnut <- cbind(coords_df[,c("cell", "cell_lon", "cell_lat")],terra::extract(ecoregions,  coords)) %>% 
-#   select(cell, cell_lon, cell_lat, ECO_NAME)
-# 
-# # take the nearest for cells that didn't return a value
-# missing_values <- ecoreg_globnut %>% 
-#   filter(is.na(ECO_NAME))
-# missing_coords_df <- missing_values %>% 
-#   dplyr::select(cell, cell_lon, cell_lat)
-# missing_coords <- terra::vect(missing_coords_df, geom = c("cell_lon", "cell_lat"),  crs = "EPSG:4326")
-# nearest_ecoreg <- cbind(missing_coords_df[,c("cell", "cell_lon", "cell_lat")], terra::nearest(missing_coords, ecoregions))
-# ids <- terra::values(ecoregions) %>% 
-#   as.data.frame() %>% 
-#   dplyr::select(OBJECTID, ECO_NAME) 
-# missing_ecoreg <- nearest_ecoreg %>% 
-#   left_join(ids, by = c("to_id" = "OBJECTID")) %>% 
-#   select(cell, cell_lon, cell_lat, ECO_NAME)
-# 
-# # combine 
-# ecoreg_globnut <- ecoreg_globnut %>% 
-#   filter(!is.na(ECO_NAME)) %>% 
-#   bind_rows(missing_ecoreg)
-  
-# saveRDS(ecoreg_globnut, "outputs/Ecoregions_emep_grid.rds")
-ecoreg <- readRDS( "outputs/Ecoregions_emep_grid.rds")
-```
-
+## iNEXT
 ```{r nobs}
-# in cell
-# check diff in sample year
-# discard plot pairs sampled > 10 year  from eachother
+# in cell check diff in sample year
+# discard plot pairs sampled > 10 year  from each other
 plot_ids <- globnut %>% 
   group_by(cell) %>% 
   # all combinations of plots in a cell
@@ -179,6 +85,7 @@ plot_ids <- globnut %>%
   unique() 
 
 ## cells with enough data
+nobs <- 3
 cell_ids <- globnut %>% 
   # discard plots that are sampled too many years apart
   filter(!plot_ID %in% plot_ids) %>% 
@@ -186,12 +93,8 @@ cell_ids <- globnut %>%
   summarise(n = n()) %>% 
   filter(n >= nobs) %>% 
   pull(cell)
-```
 
-There are `r length(cell_ids)` gridcells with at least `r nobs` plots
-
-```{r map, warning=FALSE}
-# Euroasia shape file
+# Check spatial distribution of cells
 world <- ne_countries(scale = "medium", returnclass = "sf")
 eurasia <- world[world$continent %in% c("Asia", "Europe"),]
 coords_sf <- st_as_sf(unique(globnut[globnut$cell %in% cell_ids, c("cell_lon", "cell_lat")]), 
@@ -207,54 +110,23 @@ p
 
 ```
 
-## Method
 
-Explanatory variables
-
--   N deposition per gridcell `ndep`
-
--   NP mean per gridcell `mean_np`
-
--   Mean difference in NP between plots in a gridcell `dif_np`
-
--   Biomass mean per gridcell `mean_bio`
-
--   Mean biomass difference between plots in a gridcell `dif_bio`
-
--   Mean MAT, MAP, PET in a gridcell `MAT, MAP, PET`
-
--   Mean pH `pH`
-
--   Mean distance in meters between plots `distm`
-
--   Mean difference in elevation between plots `elev`
-
--   Random effect of ecoregion `ECO_NAME`
-
-Full model:
-`beta ~ distm + elev + MAT + MAP + PET + pH + ndep + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME)`
-
-Model selection on `distm + elev + MAT + MAP + PET + pH`, always
-retaining `ndep + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME)`
-
-Running Moran's test for checking residual spatial autocorrelation
-
-```{r inext}
+```{r running-inext}
 ## Run iNext for rarefaction and extrapolation of beta diversity
 # Convert to incidence format for inext
 # incidence_data <- spec %>%
-#   filter(!plot_ID %in% plot_ids) %>% 
+#   filter(!plot_ID %in% plot_ids) %>%
 #   filter(cell %in% cell_ids) %>%  # cells with at least nobs observations
 #   filter(!cell == 538542) %>% # only 1 vasc species because high moss abundance, which iNext doesn't like
-#   ungroup() %>% 
+#   ungroup() %>%
 #   dplyr::select(cell, plot_ID, species_new, cover) %>%
-#   mutate(species_new = str_replace(species_new, pattern = "[:space:]", replacement = "_")) %>% 
+#   mutate(species_new = str_replace(species_new, pattern = "[:space:]", replacement = "_")) %>%
 #   group_split(cell) %>%
 #   purrr::map(., ~pivot_wider(.,names_from = "plot_ID",values_from = "cover", values_fill = 0) %>%
-#                dplyr::select(.,-cell) %>% 
-#                column_to_rownames("species_new") %>% 
+#                dplyr::select(.,-cell) %>%
+#                column_to_rownames("species_new") %>%
 #                as.matrix())
-
+# 
 # beta_results <- iNEXTbeta3D(
 #   data = incidence_data,
 #   diversity = "TD",  # Taxonomic diversity
@@ -272,30 +144,19 @@ beta0 <- beta_results %>%
   filter(Order.q == 0) %>% 
   mutate(cell = cell_ids[!cell_ids == 538542]) %>% 
   rename(beta_inext = Beta)
-# Extract beta diversity estimates
-beta1 <- beta_results %>% 
-  map_df(., "beta") %>% 
-  filter(Order.q == 1) %>% 
-  mutate(cell = cell_ids[!cell_ids == 538542]) %>% 
-  rename(beta_inext = Beta)
-# Extract beta diversity estimates
-beta2 <- beta_results %>% 
-  map_df(., "beta") %>% 
-  filter(Order.q == 2) %>% 
-  mutate(cell = cell_ids[!cell_ids == 538542]) %>% 
-  rename(beta_inext = Beta)
+
+
 ```
 
+## Preparing environmental variables
 ```{r env-var}
-## Calculating explanatory variables
+## Calculating explanatory variables to the cell level
 env_var <- globnut %>% 
  # same plots and cells as the incidence data
  filter(!plot_ID %in% plot_ids) %>% 
  filter(cell %in% cell_ids) %>% 
  group_by(cell) %>% 
  summarise(
-   nplots = n_distinct(plot_ID),
-   ## Confounders
    # Distance between plots
    distm = mean(distm(cbind(lon, lat), fun = distGeo)),
            # Elevation difference between plots
@@ -306,176 +167,246 @@ env_var <- globnut %>%
            MAT = mean(MAT, na.rm = TRUE),
            MAP = mean(MAP, na.rm = TRUE),
            PET = mean(PET, na.rm = TRUE),
-           # Number of habitats in a cell
-           nhab = n_distinct(habitat),
-           # average pH
-           pH = mean(pH),
-           ## Predictors
            # n deposition
            ndep = mean(ndep),
-           # Average biomass
-           mean_bio = mean(biomass),
            # Average N/P
            mean_np = mean(NP),
            # Differences in NP
            dif_np = {diff_matrix <- abs(outer(NP, NP, "-"))
            mean(diff_matrix[lower.tri(diff_matrix)])
-           },
-           # Differences in biomass
-           dif_bio =  {diff_matrix <- abs(outer(biomass, biomass, "-"))
-             mean(diff_matrix[lower.tri(diff_matrix)])
-           },
-           # sample year
-           dif_year = {diff_matrix <- abs(outer(sample_year, sample_year, "-"))
-           mean(diff_matrix[lower.tri(diff_matrix)])
            }
            ) %>% 
- mutate(ndep = log(ndep*10),
-        mean_bio = log(mean_bio),
-        dif_bio = log(dif_bio),
+ mutate(ndep = log(ndep/5),# to g/ha/yr
         dif_np = log(dif_np),
         mean_np = log(mean_np),
         distm = log(distm +1),
         elev = log(elev+1)
         ) %>% 
  drop_na()
-  
-# hist(env_var$elev)
-# hist(env_var$distm)
-# hist(env_var$MAT)
-# hist(env_var$MAP)
-# hist(env_var$PET)
-# hist(env_var$pH)
-# hist(env_var$ndep)
-# hist(env_var$mean_np)
-# hist(env_var$mean_bio)
-# hist(env_var$dif_bio)
-# hist(env_var$dif_np)
-# hist(env_var$nhab)
-```
 
-```{r mod-data}
+
+# create data frame with model data
 mod_dat <- env_var %>%    
   # cell coordinates
   left_join(globnut %>% 
               dplyr::select(cell, cell_lon, cell_lat) %>% 
               distinct(), by = "cell") %>%
-  # ecoregions
-  left_join(ecoreg %>% dplyr::select(cell, ECO_NAME), by = "cell") %>% # Check missing cells ecoregions!!!
   # standardized beta div
   left_join(beta0 %>% dplyr::select(cell, beta_q0 = beta_inext), by = "cell") %>%
-  left_join(beta1 %>% dplyr::select(cell, beta_q1 = beta_inext), by = "cell") %>% 
-  left_join(beta2 %>% dplyr::select(cell, beta_q2 = beta_inext), by = "cell") %>% 
+  # scale expl variables 
+  mutate(across(c("distm", "elev", "MAT", "MAP", "PET", "ndep", "mean_np", "dif_np"), ~scale(.x)[,1],  .names = "{.col}_scaled")) %>% 
   drop_na() 
-# hist(beta0$beta_inext, breaks = 20)
-# hist(beta1$beta_inext, breaks = 20)
-# hist(beta2$beta_inext, breaks = 20)
+
+# functions to reverse standardization
+unstand_ndep <- function(x) {x  * sd(mod_dat$ndep) + mean(mod_dat$ndep)}
+unstand_np <- function(x) {x  * sd(mod_dat$mean_np) + mean(mod_dat$mean_np)}
+unstand_npdif <- function(x) {x  * sd(mod_dat$dif_np) + mean(mod_dat$dif_np)}
+
 ```
 
-## q0
-
-```{r}
+## Beta diversity modelling
+```{r model}
+fm_full <- "distm_scaled + elev_scaled + MAT_scaled + 
+                        MAP_scaled + PET_scaled + ndep_scaled  + dif_np_scaled + 
+                        mean_np_scaled + I(mean_np_scaled^2) + ndep_scaled*dif_np_scaled + 
+            ndep_scaled*mean_np_scaled"
 # full model 
-full_model_q0 <- lmer(log(beta_q0) ~ distm + elev + MAT + MAP + PET + pH  +
-          ndep  + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME),
+full_model_q0 <- lm(formula(paste0("log(beta_q0) ~",fm_full)), 
   data = mod_dat,
   na.action = "na.fail") 
-# 
-# check_model(full_model_q0) 
-# summary(full_model_q0)
 
-sb <- c("mean_bio", "ndep", "dif_bio", "mean_np", "dif_np")
-dd <- dredge(full_model_q0, fixed =  sb)
+dd <- dredge(full_model_q0,
+               subset = ndep_scaled & dif_np_scaled & mean_np_scaled,  # Always include focal variable
+  rank = "AICc")
+subset(dd, delta <= 2)
 
-selected_model_q0 <- lmer(get.models(dd,1)[[1]], data = mod_dat)
-# check_model(selected_model_q0)
-# summary(selected_model_q0)
+selected_model_q0 <- lm(get.models(dd,1)[[1]], data = mod_dat)
+# Model checks
+check_model(selected_model_q0)
+summary(selected_model_q0)
+```
 
-# check residual spatial autocorrelation 
-mod_resid <- residuals(selected_model_q0) 
-knn_weights <- knearneigh(mod_dat[,c("cell_lon", "cell_lat")], k = 4)
-knn_list <- knn2nb(knn_weights)
-knn_weights_matrix <- nb2listw(knn_list, style = "W")
 
-# Moran's I test 
-moran_test <- moran.test(mod_resid, knn_weights_matrix)  
+## Vizualisation
+```{r figures}
+# Line plots
+ndep_pred_q0 <- ggeffects::ggpredict(selected_model_q0, term = "ndep_scaled[all]") %>% 
+  as.data.frame() %>%
+  mutate(ndep = unstand_ndep(x) %>% exp) 
+difnp_pred_q0 <- ggeffects::ggpredict(selected_model_q0, term = "dif_np_scaled[all]") %>% 
+  as.data.frame() %>%
+  mutate(dif_np = unstand_npdif(x) %>% exp)
+meannp_pred_q0 <- ggeffects::ggpredict(selected_model_q0, term = "mean_np_scaled[all]") %>% 
+  as.data.frame() %>%
+  mutate(mean_np = unstand_np(x) %>% exp) 
 
-result_figure(selected_model_q0)
-ggsave("figures/fig4-beta_diversity.png", dpi = 300, height = 4, width = 5)
+count_limits <- c(0,10)
+line_colour <- "#2b8cbe"
+ylimits <- c(0,4.5)
+ylabel <- "Effective number of species"
+
+p1 <- ggplot(mod_dat, aes(x = exp(unstand_ndep(ndep_scaled)), y = beta_q0)) +
+  geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", limits = count_limits) +
+   new_scale_fill() + 
+    geom_ribbon(data = ndep_pred, aes(x = ndep, y = predicted, ymin = conf.low, 
+             ymax = conf.high), alpha = .5, col = NA, fill = line_colour) +
+    geom_line(data = ndep_pred, aes(x = ndep, y = predicted), color = line_colour) +
+    scale_x_continuous(Average~annual~N~deposition~(kg~ha^-1), 
+                       trans = "log",
+                       breaks = c(1,2,5,10,25,60),
+                       labels = c(1,2,5,10,25,60),
+                      limits = c(1,85)) +
+  scale_y_continuous(ylabel, limits = ylimits)  +
+  theme_bw() 
+p1
+p2 <-  ggplot(mod_dat, aes(x = exp(dif_np), y = beta_q0)) +
+  geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", limits = count_limits) +
+   new_scale_fill() + 
+    geom_ribbon(data = difnp_pred, aes(x = dif_np, y = predicted, ymin = conf.low, 
+             ymax = conf.high), alpha = .5, col = NA, fill = line_colour) +
+    geom_line(data = difnp_pred, aes(x = dif_np, y = predicted), color = line_colour) +
+    scale_x_continuous("Average difference in N/P") +
+  scale_y_continuous(ylabel, limits = ylimits) +
+  theme_bw() 
+
+
+p3 <- ggplot(mod_dat, aes(x = exp(mean_np), y = beta_q0)) +
+    geom_hex() +
+    scale_fill_gradient("Count",low = "grey90", high = "grey40", limits = count_limits) +
+    new_scale_fill() + 
+    geom_ribbon(data = meannp_pred, aes(x = mean_np, y = predicted, ymin = conf.low,
+             ymax = conf.high), alpha = .5, col = NA, fill = line_colour) +
+    geom_line(data = meannp_pred, aes(x = mean_np, y = predicted), color = line_colour) +
+    scale_x_continuous("Mean N/P") +
+  scale_y_continuous(ylabel, limits = ylimits) +
+  theme_bw()
+
+pp <- ((p1|p2|p3) + plot_layout(guides = "collect", axes = "collect")+ plot_annotation(tag_levels = "a")) & theme(legend.position = "bottom")
+pp
+
+ggsave("figures/202511-Figures-resubmission/PDFs-for-Ton/fig4.pdf", dpi = 300, width = 7.24, height = 4)
+```
+
+## Model outputs for supplementary
+```{r tabels}
+
+# function for formatting table
+result_table <- function(mod){
+  tab <-  mod %>% 
+  model_parameters() %>%   
+  mutate(Parameter = case_match(Parameter,
+                           "(Intercept)" ~ "Intercept",
+                "dif_np_scaled" ~ "Difference N/P",
+                "ndep_scaled" ~ "N deposition",
+                "mean_np_scaled" ~ "Mean N/P",
+                "I(mean_np_scaled^2)" ~ "Mean N/P<sup>2</sup>",
+                "MAP_scaled" ~ "Mean MAP",
+                "distm_scaled" ~ "Geographical distance")) %>% 
+  # Combine coefficient and SE
+  mutate(`Estimate (SD)`= paste0(round(Coefficient, 3), " (", round(SE, 3), ")"),
+      # Combine CI
+      CI = paste0("[", round(CI_low, 3), ", ", round(CI_high, 3), "]"),
+      `Significance level` = case_when(
+        p < 0.001 ~ "***",
+                    p < 0.01 ~ "**",
+                    p < 0.05 ~ "*",
+                    TRUE ~ "NS"),
+      `p-value` = case_when(p < 0.001 ~ "<0.001",
+                              TRUE ~ as.character(round(p,4)))) %>% 
+  select(Parameter, `Estimate (SD)`, CI, `p-value`, `Significance level`) %>% 
+  add_row(Parameter = c("Adjusted R<sup>2</sup>"),
+          `Estimate (SD)` = c(round(r2(mod)$R2_adjusted,3)) %>% as.character()) %>% 
+  replace_na(list(`Estimate (SD)` = "-", CI = "-", `p-value` = "-", `Significance level` = "-")) %>% 
+  knitr::kable()
+  return(tab)
+}
+# function for model selection table
+model_selection_tab <- function(dd){ 
+  dd %>% 
+    as.data.frame() %>% 
+    slice_head(n = 10) %>% 
+    mutate(across(where(is.numeric), ~round(.,digits = 3))) %>% 
+    mutate(across(where(is.numeric), ~as.character(.) %>% replace_na( "-"))) %>% 
+    rename(Intercept =  `(Intercept)`,
+          `Difference N/P` = dif_np_scaled,
+          `N deposition` = ndep_scaled,
+          `Mean N/P` = mean_np_scaled,
+          `Mean N/P<sup>2</sup>` =  `I(mean_np_scaled^2)`,
+          `Mean MAP` = MAP_scaled,
+          `Geographical distance` = `distm_scaled`,
+          `Difference N/P:N deposition` = `dif_np_scaled:ndep_scaled`,
+           `Mean N/P:N deposition`= `mean_np_scaled:ndep_scaled`,
+          `Mean MAT` = MAT_scaled,
+          `Mean PET` = PET_scaled,
+          `Elevation difference` = elev_scaled) %>% 
+    knitr::kable()
+}
+
+# table for supplementary 
 result_table(selected_model_q0)
-
+model_selection_tab(dd)
 ```
 
-Moran's test p value:`r round(moran_test$p.value,4)` - no residual
-autocorrelation
 
-## q1
+# Spatial cross valication
+```{r spatial-cross}
+globnut_sf <- sf::st_as_sf(mod_dat, coords = c("cell_lon","cell_lat"), crs = 4326)
+globnut_sf$residuals <- residuals(selected_model_q0)
+globnut_sp <- as(globnut_sf, "Spatial")
 
-```{r}
-# full model 
-full_model_q1 <- lmer(log(beta_q1) ~ distm + elev + MAT + MAP + PET + pH  +
-          ndep  + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME),
-  data = mod_dat,
-  na.action = "na.fail") 
+# Variogram
+emp_variogram <- variogram(
+  residuals ~ 1, 
+  data = globnut_sp,
+  cutoff = 10000,
+  width = 10   
+)
 
-# check_model(full_model_q1) 
-# summary(full_model_q1)
+fit_vario <- fit.variogram(emp_variogram, vgm("Exp"), fit.method = 6)
+plot(emp_variogram, fit_vario,
+     xlab = "Distance (m)",
+     ylab = "Semivariance")
 
-sb <- c("mean_bio", "ndep", "dif_bio", "mean_np", "dif_np")
-dd <- dredge(full_model_q1, fixed =  sb)
 
-selected_model_q1 <- lmer(get.models(dd,1)[[1]], data = mod_dat)
-# check_model(selected_model_q1)
-# summary(selected_model_q1)
+# function to calculate rmse 
+evaluate_fit <- function(mod, id, split, nclus) {
+  mod <- lm(formula(mod),
+              data = analysis(split)
+  )
+  
+  test_data <- assessment(split)
+  pred <- predict(mod, newdata = test_data, allow.new.levels = TRUE)
+  res <- tibble(rmse = sqrt(mean((log(test_data$beta_q0) - pred)^2, na.rm = TRUE)),
+                mae = mean(abs(log(test_data$beta_q0) - pred), na.rm = TRUE),
+                rsq = cor(log(test_data$beta_q0), pred, use = "complete.obs")^2,
+                clus = nclus,
+                id = id,
+                mod = list(mod))
+  }
 
-# check residual spatial autocorrelation 
-mod_resid <- residuals(selected_model_q1) 
-knn_weights <- knearneigh(mod_dat[,c("cell_lon", "cell_lat")], k = 4)
-knn_list <- knn2nb(knn_weights)
-knn_weights_matrix <- nb2listw(knn_list, style = "W")
+# chose number of folds = 20 
+nfolds <- 20
+folds <- spatial_clustering_cv(globnut_sf, v = nfolds)
+cv <- map2_dfr(folds$id, folds$splits, ~evaluate_fit(selected_model_q0,.x,.y, nfolds))
 
-# Moran's I test 
-moran_test <- moran.test(mod_resid, knn_weights_matrix)  
+x <- autoplot(folds)$data %>% 
+  as.data.frame() %>% 
+  rename(id = .fold.) %>% 
+  left_join(.,cv, by = c("id"))
+# Euroasia shape file
+world <- ne_countries(scale = "medium", returnclass = "sf")
+eurasia <- world[world$continent %in% c("Asia", "Europe"),]
 
-result_figure(selected_model_q1)
-result_table(selected_model_q1)
-
+ggplot() +
+  geom_sf(data = eurasia) +
+  geom_sf(data = x, aes(geometry = geometry, color = rmse), alpha = 0.5) +
+  labs(color = "RMSE") +
+  coord_sf(xlim = c(-10, 150), ylim = c(35, 70)) +
+  scale_color_viridis_c() +
+  theme_bw() +
+  theme(legend.position = "bottom")
+ggsave("figures/202511-Figures-resubmission/Supp-Spatial_cross_validation_beta.png", dpi = 300)
 ```
 
-Moran's test p value:`r round(moran_test$p.value,4)` - still residual
-autocorrelation
-
-## q2
-
-```{r}
-# full model 
-full_model_q2 <- lmer(log(beta_q2) ~ distm + elev + MAT + MAP + PET + pH  +
-          ndep  + dif_np + mean_np + mean_bio + dif_bio + (1|ECO_NAME),
-  data = mod_dat,
-  na.action = "na.fail") 
-# check_model(full_model_q2) 
-# summary(full_model_q2)
-
-sb <- c("mean_bio", "ndep", "dif_bio", "mean_np", "dif_np")
-dd <- dredge(full_model_q2, fixed =  sb)
-
-selected_model_q2 <- lmer(get.models(dd,1)[[1]], data = mod_dat)
-# check_model(selected_model_q2)
-# summary(selected_model_q2)
-
-# check residual spatial autocorrelation 
-mod_resid <- residuals(selected_model_q2) 
-knn_weights <- knearneigh(mod_dat[,c("cell_lon", "cell_lat")], k = 4)
-knn_list <- knn2nb(knn_weights)
-knn_weights_matrix <- nb2listw(knn_list, style = "W")
-
-# Moran's I test 
-moran_test <- moran.test(mod_resid, knn_weights_matrix)  
-
-result_figure(selected_model_q2)
-result_table(selected_model_q2)
-
-```
-
-Moran's test p value:`r round(moran_test$p.value,4)` - still residual
-autocorrelation

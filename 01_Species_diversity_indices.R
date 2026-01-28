@@ -11,20 +11,15 @@
 ## Email: veeken.g.a@gmail.com
 ##
 ## ---------------------------
-##
-## Notes:
-##  
-## References:
-##
-## ---------------------------
+
 
 ## Load packages
-if (!require(tidyverse)) install.packages("tidyverse")
-if (!require(vegan)) install.packages("vegan")
-if (!require(readxl)) install.packages("readxl")
+library(tidyverse)
+library(vegan)
+library(readxl)
 
 ## Load data
-data_dir <- "Z:/_GLOBNUT1.0/" # directory with Globnut 1.0 data
+data_dir <- "~/Data/Globnut_offline/_GLOBNUT1.0/" # directory with Globnut 1.0 data
 spec_raw <- read.csv(paste0(data_dir, "GlobNut1.0_species.csv"))
 
 ## Data wrangling
@@ -54,6 +49,7 @@ spec_wide <- spec %>%
   dplyr::select(plot_ID,species_new, cover) %>% 
   # convert to wide to calculate diversity measures
   pivot_wider(names_from = species_new, values_from = cover, values_fill = 0) 
+
 spec_ric$shan <- diversity(spec_wide[,-1], index = "shannon") # Shannon entropy
 spec_ric$shan_eve <- exp(spec_ric$shan) / spec_ric$spec_ric # shannon evenness
 spec_ric$pilou_eve <- spec_ric$shan / log(spec_ric$spec_ric)
