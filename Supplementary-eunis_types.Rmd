@@ -1,0 +1,218 @@
+---
+title: "EUNIS types globnut"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+---
+```{r setup, include=FALSE}
+# global settings markdown
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      fig.height = 7,
+                      fig.width = 7,
+                      dpi = 300
+                      )
+
+# Load packages
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(rnaturalearth)) install.packages("rnaturalearth")
+if (!require(rnaturalearthdata)) install.packages("rnaturalearthdata")
+if (!require(sf)) install.packages("sf")
+if (!require(patchwork)) install.packages("patchwork")
+if (!require(knitr)) install.packages("knitr")
+
+# Load data
+globnut <- readRDS("outputs/02_GlobNut.rds")
+eunis <- read.csv("~/Data/Globnut_offline/_GLOBNUT1.0/Globnut1.0_EUNIS.csv")
+globnut <- left_join(globnut,eunis, by = "plot_ID") %>% 
+  mutate(ndep = ndep/5)
+```
+
+```{r nplots}
+habitat_selection <- c("R1", "R2","R3","Q2", "Q5","U3")
+
+## vizz
+veg_label_table <- globnut %>% 
+  select(sub_class, eunis_label2) %>% 
+  distinct() 
+veg_labels <- str_wrap(paste0(veg_label_table$sub_class,": ",veg_label_table$eunis_label), 30)   
+names(veg_labels) <- veg_label_table$sub_class
+veg_colors <-  c(
+  # Q - Mires/Fens (blues)
+  "Q1" = "#deebf7",
+  "Q2" = "#bdd7e7",
+  "Q4" = "#6baed6",
+  "Q5" = "#2171b5",
+  
+  # R - Grasslands (greens)
+  "R1" = "#bae4b3",
+  "R2" = "#74c476",
+  "R3" = "#31a354",
+  "R4" = "#238b45", 
+  "R5" = "#006d2c",
+  "R6" = "#00441b",
+  
+  # S - Scrub/Heath (purples)
+  "S1" = "#dadaeb",
+  "S2" = "#bcbddc",
+  "S3" = "#807dba",
+  "S4" = "#9e9ac8",
+  "S9" = "#6a51a3",
+  
+  # T - Forests (browns)
+  "T1" = "#a1887f",
+  "T3" = "#5d4037",
+  
+  # U - Rock habitats (greys)
+  "U2" = "#bdbdbd",
+  "U3" = "#737373",
+  
+  # V - Artificial habitats (oranges)
+  "V1" = "#fdbe85",
+  "V3" = "#fd8d3c",
+  
+  # N - Coastal (yellows)
+  "N1" = "#fff7bc",
+  "N2" = "#fee391",
+  "N3" = "#fec44f",
+  
+  # M - 
+  "MA" = "#a2d4ec"
+)
+
+p1 <- globnut %>% 
+  filter(sub_class %in% habitat_selection) %>% 
+  filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = NP, fill = sub_class)) +
+    geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("N/P") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  theme_bw() 
+p2 <- globnut %>% 
+  filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+   ggplot(aes(x = sub_class, y = biomass, fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous(expression(paste("Biomass (g/", m^2,")"))) +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  theme_bw()
+p3 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = MAT, fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("MAT (°C)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+p4 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = MAP, fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("MAP (mm/yr)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+p5 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = PET, fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("PET (mm/yr)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+p6 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = ndep, fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("N deposition (kg/ha)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+
+
+pp <- (p1 + p2 + plot_layout(axes = "collect")) / (p3 + p4 + plot_layout(axes = "collect")) / (p5 + p6 + plot_layout(axes = "collect")) + plot_layout(guides = "collect", axes = "collect") &
+  theme(legend.position = "none")
+pp
+ggsave("Figures/202511-Figures-resubmission/Supp-Eunis-env-variables.png", dpi = 300, width = 7.24, height = 9)
+
+
+p7 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = log(spec_ric), fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("q0 (Effective number\nof species)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+p8 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = log(q1), fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("q1 (Effective number\nof species)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+p9 <- globnut %>% 
+   filter(sub_class %in% habitat_selection) %>% 
+    filter(!is.na(sub_class)) %>% 
+  ggplot(aes(x = sub_class, y = log(q2), fill = sub_class)) +
+  geom_boxplot() +
+  scale_x_discrete("", labels = veg_labels, limits = rev) +
+  scale_y_continuous("q2 (Effective number\nof species)") +
+  scale_fill_manual("EUNIS class", values = veg_colors) +
+  coord_flip() + 
+  geom_boxplot() +
+  theme_bw()
+pp <- (p7 + p8 + p9 + plot_layout(guides = "collect", axes = "collect")) &
+  theme(legend.position = "none")
+pp
+
+ggsave("Figures/202511-Figures-resubmission/Supp-Eunis-div.png", dpi = 300, width = 7.24, height = 5)
+
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+eurasia <- world[world$continent %in% c("Europe", "Asia"),]
+ids <- match(globnut$sub_class, names(veg_labels))
+globnut$long_label <- veg_labels[ids]
+globnut <- globnut %>% 
+  mutate(sub_class = factor(sub_class, levels = habitat_selection))
+coords_sf <- st_as_sf(globnut[globnut$sub_class %in% habitat_selection,], coords = c("lon", "lat"), crs = 4326)
+  
+ggplot() +
+  geom_sf(data = eurasia, fill = "white", col = "grey70") +
+  geom_sf(data = coords_sf, aes(col = sub_class), size = .5, alpha = 0.6) +
+  coord_sf(crs = "+proj=lcc +lat_1=45 +lat_2=55 +lat_0=50 +lon_0=35",
+           xlim = c(-4000000, 4500000), ylim = c(-1000000, 4500000)) +
+  scale_color_manual(values = veg_colors, labels = veg_labels) +
+  facet_wrap(~sub_class, labeller = labeller(sub_class= veg_labels),
+             ncol = 2) +
+  theme_bw() +
+  theme(legend.position = "none",
+        legend.title = element_blank()) +
+  guides(color = guide_legend(nrow = 6))
+ggsave("Figures/202511-Figures-resubmission/Supp-Eunis-maps.png", dpi = 300, width = 7.24, height = 9)
+
+```
+
