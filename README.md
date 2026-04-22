@@ -1,6 +1,6 @@
 # globnut-env
 
-This repo contains the code for the article "Nutrient stoichiometry mediates nitrogen deposition effects on plant diversity" (in prep).
+This repo contains the code for the manuscript "Nutrient stoichiometry mediates nitrogen deposition effects on plant diversity" (in prep).
 
 ## Environmental data
 
@@ -9,6 +9,8 @@ This repo contains the code for the article "Nutrient stoichiometry mediates nit
 -   `Extract_N_deposition.R` - to calculate the N deposition variable and fig. 1b
 
 -   `Extract_DEM.R` - to extract elevation from DEM
+  
+-   `Extract_species_pool_Cai - to extract species pool values as described in the manuscript
 
 ## Preparing data
 
@@ -24,11 +26,11 @@ Note: figures in manuscripts are post-processed in Adobe Illustrator, so figures
 
 -   `03_Geography_limitation.R`  - produces input for fig 1a and 1c
 
--   `03_SEM_GlobNut.R` - produces SEM, displayed in fig 2 and supplementary information fig. 1.3
+-   `03_SEM.R` - produces SEM, displayed in fig 2 and supplementary information figures and tables
 
--   `03_Alpha_diversity_analysis.Rmd` - linear mixed modelling, fig 3 and supplementary information fig. S2.1 and tables 2.1-2.4
+-   `03_Alpha_diversity_analysis.Rmd` - linear mixed modeling, fig 3, and supplementary information figures and tables
 
--   `03_Beta_diversity_analysis.Rmd`  - iNEXT beta diversity estimation, linear mixed modelling  and produces fig. 4
+-   `03_Beta_diversity_analysis.Rmd`  - iNEXT beta diversity estimation, linear mixed modeling,  and produces fig. 4 and supplementary information tables
 
 Data to run these scripts is available at: <https://osf.io/pgxrt/>
 
