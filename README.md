@@ -11,7 +11,7 @@ Note that figures in the manuscript are post-processed in Adobe Illustrator and 
 
 -   `Extract_DEM.R` - to extract elevation from DEM
   
--   `Extract_species_pool_Cai - to extract species pool values as described in the manuscript
+-   `Extract_species_pool_Cai` - to extract species pool values as described in the manuscript
 
 ## Preparing data
 
