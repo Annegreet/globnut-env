@@ -1,6 +1,7 @@
 # globnut-env
 
 This repo contains the code for the manuscript "Nutrient stoichiometry mediates nitrogen deposition effects on plant diversity" (in prep).
+Note that figures in the manuscript are post-processed in Adobe Illustrator and appear different in R than presented in the manuscript. 
 
 ## Environmental data
 
