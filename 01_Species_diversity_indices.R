@@ -19,7 +19,7 @@ library(vegan)
 library(readxl)
 
 ## Load data
-data_dir <- "~/Data/Globnut_offline/_GLOBNUT1.0/" # directory with Globnut 1.0 data
+data_dir <- "Z:/_GLOBNUT1.0/" # directory with Globnut 1.0 data
 spec_raw <- read.csv(paste0(data_dir, "GlobNut1.0_species.csv"))
 
 ## Data wrangling
