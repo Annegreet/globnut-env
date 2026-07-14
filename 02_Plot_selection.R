@@ -45,10 +45,6 @@ npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>%
                          P >= 0.11 & N >= 2 & K >= 0.8 ~ "No limitation by N, P, K",
                          TRUE ~ "No limitation by N, P, K"))
 
-
-meta <- read.csv(paste0(data_dir, "GlobNut1.0_metadata.csv")) %>% 
-  mutate(plot_size = if_else(cont_ID == 139, 9,plot_size)) #correct plot size from 0.09
-
 grid <- readRDS("outputs/01_Globnut_grid_res15.rds") %>%
   rename(plot_ID = globnut.plot_ID) %>%
   dplyr::select(-lat, -lon, dg_cell = cell)
@@ -75,7 +71,8 @@ globnut_raw <- meta %>%
   left_join(elev, by = "plot_ID") %>%
   left_join(eunis, by = "plot_ID") %>% 
   left_join(grid, by = "plot_ID") %>% 
-  left_join(spec_pool, by = "plot_ID")
+  left_join(spec_pool, by = "plot_ID") %>% 
+  drop_na(lon, lat, spec_ric, q1, q2, biomass, N, P)
   
 # saveRDS(globnut_raw, "outputs/02_Globnut_raw.rds")
 
@@ -88,7 +85,7 @@ globnut <- globnut_raw %>%
   mutate(z_biomass = (biomass - mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
   # filter out plots that are fertilized
-  filter(harm_fert_appl == 0 ) %>% 
+  filter(harm_fert_appl == 0) %>% 
   # select relevant columns
   dplyr::select(cont_ID, plot_ID, country, cell, dg_cell, cell_lon, cell_lat, 
                 plot_size, sample_year = year, 
@@ -96,10 +93,7 @@ globnut <- globnut_raw %>%
                 ndep = sum_5yr, MAT, MAP, PET, pH, pH_field, pH_soilgrids, N, P,
                 K, NP, lim, habitat = sub_class, data_source) %>% 
   # remove globnut plots with incomplete data
-  drop_na(lon, lat, spec_ric, q1, q2, biomass, N, P, MAT, MAP, pH,
-          ndep,  plot_size, habitat, spec_pool) 
-globnut$lim %>% table()
-globnut$lim2 %>% table()
+  drop_na(MAT, MAP, pH, ndep,  plot_size, habitat, spec_pool) 
 
 saveRDS(globnut, "outputs/02_GlobNut.rds")
 
@@ -112,7 +106,7 @@ globnut <- globnut_raw %>%
   mutate(z_biomass = (biomass - mean(biomass))/sd(biomass)) %>% 
   filter(z_biomass < 4) %>% 
   # filter out plots that are fertilized
-  filter(harm_fert_appl == 0 ) %>% 
+  filter(harm_fert_appl == 0) %>% 
   # select relevant columns
   dplyr::select(cont_ID, plot_ID, country, cell, dg_cell, cell_lon, cell_lat, 
                 plot_size, sample_year = year, 
