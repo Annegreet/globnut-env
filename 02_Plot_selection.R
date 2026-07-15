@@ -44,7 +44,7 @@ npk <- read.csv(paste0(data_dir, "GlobNut1.0_nutrients.csv")) %>%
                          NP >= 10 & NP <= 16 & P < 0.11 & N < 2 ~ "Co-limitation N-P",
                          P >= 0.11 & N >= 2 & K >= 0.8 ~ "No limitation by N, P, K",
                          TRUE ~ "No limitation by N, P, K"))
-
+meta <- read.csv(paste0(data_dir, "GlobNut1.0_metadata.csv"))
 grid <- readRDS("outputs/01_Globnut_grid_res15.rds") %>%
   rename(plot_ID = globnut.plot_ID) %>%
   dplyr::select(-lat, -lon, dg_cell = cell)
@@ -73,8 +73,7 @@ globnut_raw <- meta %>%
   left_join(grid, by = "plot_ID") %>% 
   left_join(spec_pool, by = "plot_ID") %>% 
   drop_na(lon, lat, spec_ric, q1, q2, biomass, N, P)
-  
-# saveRDS(globnut_raw, "outputs/02_Globnut_raw.rds")
+saveRDS(globnut_raw, "outputs/02_Globnut_raw.rds")
 
 # selection of plots for analysis
 globnut <- globnut_raw %>% 

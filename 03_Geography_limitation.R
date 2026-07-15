@@ -285,4 +285,26 @@ ggplot() +
 ggsave("figures/202511-Figures-resubmission/Sup-pH_map.png", dpi = 300, width = 7.24, height = 6)
 }
 
+## Table with % limitation by ndep category 
+globnut_pal <- readRDS("outputs/02_GlobNut_critical_ratios_palpurina.rds")
+perc_pal <- globnut_pal %>% 
+  mutate(ndep_cat = cut(ndep/5, breaks = seq(0, 30, by = 5))) %>% 
+  group_by(ndep_cat,lim2) %>% 
+  summarise(n_plots = n()) %>% 
+  group_by(ndep_cat) %>% 
+  mutate(perc_lim = round(n_plots/sum(n_plots) * 100, digits = 1)) 
+globnut %>% 
+  mutate(ndep_cat = cut(exp(ndep), breaks = seq(0, 30, by = 5))) %>% 
+  group_by(ndep_cat,lim) %>% 
+  summarise(n_plots = n()) %>% 
+  group_by(ndep_cat) %>% 
+  mutate(perc_lim = round(n_plots/sum(n_plots) *100, digits = 1)) %>% 
+  left_join(perc_pal, by = c("ndep_cat", "lim" = "lim2")) %>% 
+  rename(`N deposition range` = ndep_cat ,
+         `Limitation type` = lim,
+         `Number of plots` = n_plots.x,
+         `%`= perc_lim.x,
+         `Number of plots (Palpurina method)` = n_plots.y,
+         `% (Palpurian method)`= perc_lim.y
+  ) %>% knitr::kable()
 
